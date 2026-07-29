@@ -21,6 +21,18 @@ pub struct Utxo {
     pub is_coinbase: bool,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AddressActivity {
+    pub transaction_id: String,
+    pub timestamp: i64,
+    pub block_height: Option<u64>,
+    pub confirmations: u64,
+    pub is_coinbase: bool,
+    pub incoming: u64,
+    pub outgoing: u64,
+    pub fee: u64,
+}
+
 #[derive(Debug, Clone)]
 struct UtxoEntry {
     output: TxOutput,
@@ -128,6 +140,66 @@ impl Blockchain {
                 .then(left.output_index.cmp(&right.output_index))
         });
         items
+    }
+
+    /// Histórico derivado da chain local e do mempool. A chave privada nunca
+    /// participa desta consulta: ela é adequada para carteira e Explorer.
+    pub fn address_activity(&self, address: &str, limit: usize) -> Result<Vec<AddressActivity>> {
+        let mut outputs = HashMap::<UtxoKey, TxOutput>::new();
+        let mut activity = Vec::new();
+        let tip = self.height();
+
+        for block in &self.chain {
+            for transaction in &block.transactions {
+                let (incoming, outgoing, input_total) =
+                    Self::address_amounts(transaction, address, &outputs)?;
+                if incoming > 0 || outgoing > 0 {
+                    let total_output = transaction.checked_total_output()?;
+                    activity.push(AddressActivity {
+                        transaction_id: transaction.id.clone(),
+                        timestamp: transaction.timestamp,
+                        block_height: (block.index > 0).then_some(block.index),
+                        confirmations: (block.index > 0)
+                            .then(|| tip.saturating_sub(block.index).saturating_add(1))
+                            .unwrap_or(0),
+                        is_coinbase: transaction.is_coinbase,
+                        incoming,
+                        outgoing,
+                        fee: (!transaction.is_coinbase)
+                            .then(|| input_total.saturating_sub(total_output))
+                            .unwrap_or(0),
+                    });
+                }
+                Self::index_transaction_outputs(transaction, &mut outputs);
+            }
+        }
+
+        for transaction in &self.mempool {
+            let (incoming, outgoing, input_total) =
+                Self::address_amounts(transaction, address, &outputs)?;
+            if incoming > 0 || outgoing > 0 {
+                let total_output = transaction.checked_total_output()?;
+                activity.push(AddressActivity {
+                    transaction_id: transaction.id.clone(),
+                    timestamp: transaction.timestamp,
+                    block_height: None,
+                    confirmations: 0,
+                    is_coinbase: false,
+                    incoming,
+                    outgoing,
+                    fee: input_total.saturating_sub(total_output),
+                });
+            }
+        }
+
+        activity.sort_by(|left, right| {
+            right
+                .timestamp
+                .cmp(&left.timestamp)
+                .then(right.transaction_id.cmp(&left.transaction_id))
+        });
+        activity.truncate(limit.clamp(1, 200));
+        Ok(activity)
     }
 
     pub fn add_to_mempool(&mut self, transaction: Transaction) -> Result<u64> {
@@ -700,6 +772,45 @@ impl Blockchain {
                     .saturating_add(params.coinbase_maturity_blocks)
     }
 
+    fn address_amounts(
+        transaction: &Transaction,
+        address: &str,
+        outputs: &HashMap<UtxoKey, TxOutput>,
+    ) -> Result<(u64, u64, u64)> {
+        let mut incoming = 0u64;
+        let mut outgoing = 0u64;
+        let mut input_total = 0u64;
+        for input in &transaction.inputs {
+            if let Some(output) = outputs.get(&(input.tx_id.clone(), input.output_index)) {
+                input_total = input_total.checked_add(output.amount).ok_or_else(|| {
+                    WynError::Validation("overflow nos inputs do histórico".into())
+                })?;
+                if output.recipient == address {
+                    outgoing = outgoing.checked_add(output.amount).ok_or_else(|| {
+                        WynError::Validation("overflow no envio do histórico".into())
+                    })?;
+                }
+            }
+        }
+        for output in &transaction.outputs {
+            if output.recipient == address {
+                incoming = incoming.checked_add(output.amount).ok_or_else(|| {
+                    WynError::Validation("overflow no recebimento do histórico".into())
+                })?;
+            }
+        }
+        Ok((incoming, outgoing, input_total))
+    }
+
+    fn index_transaction_outputs(
+        transaction: &Transaction,
+        outputs: &mut HashMap<UtxoKey, TxOutput>,
+    ) {
+        for (index, output) in transaction.outputs.iter().enumerate() {
+            outputs.insert((transaction.id.clone(), index), output.clone());
+        }
+    }
+
     fn mempool_spent_outputs(&self) -> HashSet<UtxoKey> {
         self.mempool
             .iter()
@@ -866,5 +977,33 @@ mod tests {
         let blockchain = Blockchain::new(params);
 
         assert!(blockchain.build_candidate_block(&wallet.address).is_err());
+    }
+
+    #[test]
+    fn exposes_confirmed_and_pending_activity_for_an_address() {
+        let miner = Wallet::generate().unwrap();
+        let recipient = Wallet::generate().unwrap();
+        let mut blockchain = Blockchain::new(params());
+        blockchain.mine_and_commit(&miner.address).unwrap();
+        let transaction = miner
+            .build_transaction(
+                &blockchain.get_utxos_for(&miner.address),
+                &recipient.address,
+                1_000_000_000,
+                100_000,
+            )
+            .unwrap();
+        blockchain.add_to_mempool(transaction).unwrap();
+
+        let pending = blockchain.address_activity(&recipient.address, 10).unwrap();
+        assert_eq!(pending.len(), 1);
+        assert_eq!(pending[0].block_height, None);
+        assert_eq!(pending[0].incoming, 1_000_000_000);
+
+        blockchain.mine_and_commit(&miner.address).unwrap();
+        let confirmed = blockchain.address_activity(&recipient.address, 10).unwrap();
+        assert_eq!(confirmed.len(), 1);
+        assert_eq!(confirmed[0].block_height, Some(2));
+        assert_eq!(confirmed[0].confirmations, 1);
     }
 }

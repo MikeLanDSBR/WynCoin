@@ -29,7 +29,13 @@ fi
 
 cd "$PROJECT_ROOT"
 echo "Compilando workspace WynCoin em release..."
-cargo build --release --workspace
+# Não compile a carteira desktop aqui: este fluxo também é usado em nós
+# headless, que não possuem as dependências gráficas do Tauri.
+cargo build --release \
+  -p wyncoind \
+  -p wyncoin-cli \
+  -p wyncoin-wallet \
+  -p wyncoin-explorer
 
 sudo -v
 if ! sudo test -f /etc/systemd/system/wyncoind.service || ! sudo test -d /opt/wyncoin || ! sudo test -d /var/lib/wyncoin; then

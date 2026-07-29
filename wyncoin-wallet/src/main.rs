@@ -81,7 +81,7 @@ fn run() -> Result<()> {
         }
         Command::Balance { file, address } => {
             let address = match (file, address) {
-                (Some(file), None) => Wallet::load_from_file(file)?.address,
+                (Some(file), None) => Wallet::load_from_file(file)?.address.clone(),
                 (None, Some(address)) => address,
                 _ => {
                     return Err(wyncoin_core::WynError::Validation(

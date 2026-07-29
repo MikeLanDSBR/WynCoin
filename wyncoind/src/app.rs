@@ -74,7 +74,7 @@ fn run() -> Result<()> {
             );
             wallet
         };
-        wallet.address
+        wallet.address.clone()
     };
 
     let params = ChainParams {
@@ -772,6 +772,11 @@ fn handle_request_inner(
         Request::Utxos { address } => with_state(runtime, |state| {
             Ok(ApiResponse::success(
                 state.blockchain.get_utxos_for(&address),
+            ))
+        }),
+        Request::AddressHistory { address, limit } => with_state(runtime, |state| {
+            Ok(ApiResponse::success(
+                state.blockchain.address_activity(&address, limit)?,
             ))
         }),
         Request::SubmitTransaction { transaction } => submit_transaction(runtime, transaction),

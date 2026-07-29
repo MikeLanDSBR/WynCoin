@@ -47,6 +47,7 @@ pub enum Request {
     Status,
     Balance { address: String },
     Utxos { address: String },
+    AddressHistory { address: String, limit: usize },
     SubmitTransaction { transaction: Transaction },
     Blocks { limit: usize },
     Block { height: u64 },

@@ -27,7 +27,14 @@ if [[ ( -e "$GLOBAL_COMMAND" || -L "$GLOBAL_COMMAND" ) && ! is_managed_global_co
 fi
 
 cd "$PROJECT_ROOT"
-cargo build --release --workspace
+# O aplicativo desktop Tauri é destinado ao computador do usuário e pode exigir
+# bibliotecas gráficas ausentes em VPS/headless. O serviço instala somente os
+# binários de nó e operação local.
+cargo build --release \
+  -p wyncoind \
+  -p wyncoin-cli \
+  -p wyncoin-wallet \
+  -p wyncoin-explorer
 
 sudo -v
 

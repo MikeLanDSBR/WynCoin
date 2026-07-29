@@ -11,6 +11,7 @@ use rsa::signature::{RandomizedSigner, SignatureEncoding, Verifier};
 use rsa::{RsaPrivateKey, RsaPublicKey};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256 as RawSha256};
+use zeroize::Zeroize;
 
 use crate::blockchain::{Transaction, TxInput, TxOutput, Utxo};
 use crate::{Result, WynError};
@@ -20,6 +21,12 @@ pub struct Wallet {
     pub private_key_pem: String,
     pub public_key_pem: String,
     pub address: String,
+}
+
+impl Drop for Wallet {
+    fn drop(&mut self) {
+        self.private_key_pem.zeroize();
+    }
 }
 
 impl Wallet {

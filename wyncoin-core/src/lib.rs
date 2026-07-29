@@ -15,10 +15,12 @@ pub mod protocol {
     pub use crate::network::*;
 }
 
-pub use consensus::{Block, Blockchain, ChainParams, Transaction, TxInput, TxOutput, Utxo};
+pub use consensus::{
+    AddressActivity, Block, Blockchain, ChainParams, Transaction, TxInput, TxOutput, Utxo,
+};
 pub use network::{send_request, ApiResponse, NodeStatus, P2pMessage, PeerHello, Request};
 pub use node::{NodeConfig, Storage};
 pub use support::{format_wyn, parse_wyn, WynError, SATOSHIS_PER_WYN};
-pub use wallet::Wallet;
+pub use wallet::{EncryptedWalletFile, Wallet, WalletMetadata};
 
 pub type Result<T> = std::result::Result<T, WynError>;

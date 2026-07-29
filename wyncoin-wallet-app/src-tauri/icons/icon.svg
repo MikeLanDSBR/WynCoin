@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="WynCoin Wallet">
+  <rect width="512" height="512" rx="112" fill="#06241f"/>
+  <rect x="28" y="28" width="456" height="456" rx="92" fill="none" stroke="#2de0bd" stroke-width="14"/>
+  <path d="M126 144h55l38 183 47-124h42l47 124 38-183h55l-59 224h-53l-49-122-49 122h-53z" fill="#f2fffb"/>
+</svg>
