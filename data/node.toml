@@ -1,14 +1,14 @@
 [network]
-id = "wyncoin-local-v1"
+id = "wyncoin-local-v2"
 listen = "127.0.0.1:9332"
 
 [chain]
-# A v0.1.0 usa dificuldade fixa por quantidade de zeros hexadecimais.
-difficulty = 4
+initial_target = 72057594037927935
 # 50 WYN em unidades mínimas (1 WYN = 100_000_000 unidades).
 block_reward = 5000000000
-# Regra de consenso: nenhum bloco pode ser confirmado antes deste intervalo.
-min_block_interval_seconds = 60
+target_block_time_seconds = 60
+retarget_interval_blocks = 20
+max_retarget_factor = 4
 max_transactions_per_block = 100
 
 [mining]

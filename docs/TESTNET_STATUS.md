@@ -4,7 +4,7 @@ Atualizado em 29 de julho de 2026.
 
 ## Estado atual
 
-A rede em execução é a **`wyncoin-public-testnet-v2`**. Ela é uma testnet
+A próxima rede é a **`wyncoin-public-testnet-v3`**. Ela é uma testnet
 experimental: não deve receber valor real e suas regras de consenso ainda podem
 mudar com wipe obrigatório.
 
@@ -43,34 +43,42 @@ Não usar apenas `http://127.0.0.1`, pois isso tenta a porta 80.
 - `wipe.sh` para ambiente local, carteira pessoal ou instalação de serviço.
 - `update-service.sh` para atualizar binários sem apagar chain/configuração.
 
-## Consenso atual da v2
+## Consenso da v3: retarget automático
 
 A v1 exigia um intervalo mínimo rígido de 60 segundos entre blocos. Isso fazia
 o nó que criou o bloco anterior chegar primeiro à próxima janela, impedindo uma
 disputa PoW real entre máquinas.
 
-A v2 removeu essa trava rígida. Agora os nós mineram após receber o último
-bloco e disputam o nonce em paralelo. A configuração contém:
+A v3 mantém a disputa PoW paralela e substitui a dificuldade fixa por um alvo
+numérico, calculado sobre os primeiros 64 bits do hash. Menor alvo significa
+mais trabalho. A configuração contém:
 
 ```toml
 [chain]
-difficulty = 6
+initial_target = 1099511627775
 target_block_time_seconds = 60
+retarget_interval_blocks = 20
+max_retarget_factor = 4
 ```
 
-`target_block_time_seconds` é a meta da rede, mas **ainda não existe retarget
-automático**. Portanto a dificuldade 6 é apenas uma calibração inicial e não
-garante blocos a cada 60 segundos.
+Após cada janela de 20 blocos, o próximo alvo é recalculado a partir do tempo
+real da janela. A mudança por janela é limitada a 4× para evitar oscilações
+extremas. A meta é uma média próxima de 60 segundos por bloco, não um bloqueio
+rígido de exatamente um minuto.
+
+Essa regra é consenso: todos os nós calculam o mesmo alvo esperado e rejeitam
+um bloco com alvo diferente. Ela também é usada para comparar o trabalho de
+chains concorrentes.
 
 ## Limitação importante no encerramento desta sessão
 
-O desktop Ryzen 5600 está encontrando blocos muito mais rápido que os outros
-nós. Os logs mostram VPS e servidor abandonando trabalho ao receberem um novo
-topo. Isso é esperado com dificuldade fixa baixa para o hashrate atual, mas não
-é aceitável como política final da rede.
+O desktop Ryzen 5600 encontrou blocos muito mais rápido que os outros nós na
+v2. A v3 deve elevar o trabalho quando a janela ficar rápida e reduzi-lo quando
+a rede perder hashrate. As primeiras 40 alturas usam o alvo inicial antes do
+primeiro retarget, para não usar o timestamp artificial do gênesis no cálculo.
 
-O campo `mining.interval_seconds` **ainda não é um limitador pós-bloco** na v2.
-Não altere `chain.difficulty` em apenas uma máquina: isso quebra a identidade
+O campo `mining.interval_seconds` **ainda não é um limitador pós-bloco**. Não
+altere os parâmetros `[chain]` em apenas uma máquina: isso quebra a identidade
 da rede e o handshake P2P a rejeitará.
 
 Para parar a mineração do desktop temporariamente sem tirá-lo da rede:
@@ -83,18 +91,33 @@ sudo systemctl restart wyncoind
 
 O nó continuará sincronizando e o Explorer continuará funcionando.
 
+## Migração obrigatória v2 → v3
+
+Não execute apenas `update-service.sh` em uma instalação v2: o banco v2 possui
+blocos com o formato antigo e o novo nó os rejeitará corretamente.
+
+1. Pare a mineração nos três nós: `wyncoin mining off`.
+2. Publique este código no repositório.
+3. Em cada máquina, execute `git pull` e depois `sudo ./scripts/wipe.sh service`.
+4. Reinstale com `sudo ./scripts/install-service.sh`.
+5. Na VPS, mantenha `p2p.advertise = "191.252.204.223:9333"` em
+   `/etc/wyncoin/node.toml` antes de iniciar o serviço.
+6. Instale primeiro a VPS; depois servidor residencial e desktop.
+7. Confirme a rede com `wyncoin status`: deve aparecer
+   `wyncoin-public-testnet-v3`.
+
+O wipe remove a chain, moedas mineradas e a carteira de minerador do serviço.
+A carteira pessoal em `~/.wyncoin/wallet.json` não deve ser apagada, mas os
+fundos v2 não existirão na v3.
+
 ## Próximos passos recomendados
 
 1. Implementar `mining.interval_seconds` como cooldown **local** depois de um
    bloco confirmado pelo próprio nó. Isso permite limitar o desktop sem mudar
    consenso.
-2. Implementar reajuste determinístico de dificuldade por janela de blocos,
-   usando `target_block_time_seconds = 60` como meta.
-3. Após definir regras finais de retarget, criar uma nova versão de testnet e
-   fazer wipe consciente dos nós, pois a mudança é de consenso.
-4. Adicionar telemetria de hashrate, peers conectados, altura, dificuldade e
+2. Adicionar telemetria de hashrate, peers conectados, altura, dificuldade e
    tempo médio de bloco ao comando `wyncoin status` e ao Explorer.
-5. Melhorar a propagação P2P/anti-flood e adicionar testes de integração com
+3. Melhorar a propagação P2P/anti-flood e adicionar testes de integração com
    múltiplos nós antes de abrir a rede para terceiros.
 
 ## Operação diária

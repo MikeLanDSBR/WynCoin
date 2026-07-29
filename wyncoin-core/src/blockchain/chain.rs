@@ -20,9 +20,11 @@ pub struct Utxo {
 #[derive(Debug, Clone)]
 pub struct ChainParams {
     pub network_id: String,
-    pub difficulty: u32,
+    pub initial_target: u64,
     pub block_reward: u64,
     pub target_block_time_seconds: u64,
+    pub retarget_interval_blocks: u64,
+    pub max_retarget_factor: u64,
     pub max_transactions_per_block: usize,
 }
 
@@ -163,7 +165,7 @@ impl Blockchain {
             height,
             self.last_block().hash.clone(),
             transactions,
-            self.params.difficulty,
+            self.next_target(),
         )
     }
 
@@ -201,19 +203,61 @@ impl Blockchain {
         let mut hasher = Sha256::new();
         hasher.update(self.chain[0].hash.as_bytes());
         hasher.update(self.params.network_id.as_bytes());
-        hasher.update(self.params.difficulty.to_le_bytes());
+        hasher.update(self.params.initial_target.to_le_bytes());
         hasher.update(self.params.block_reward.to_le_bytes());
         hasher.update(self.params.target_block_time_seconds.to_le_bytes());
+        hasher.update(self.params.retarget_interval_blocks.to_le_bytes());
+        hasher.update(self.params.max_retarget_factor.to_le_bytes());
         hasher.update((self.params.max_transactions_per_block as u64).to_le_bytes());
         hex::encode(hasher.finalize())
     }
 
     pub fn cumulative_work(&self) -> u128 {
-        // A dificuldade ainda é fixa, mas a fórmula já preserva a semântica
-        // necessária para comparar cadeias se o reajuste for introduzido.
         self.chain.iter().skip(1).fold(0u128, |total, block| {
-            total.saturating_add(16u128.saturating_pow(block.header.difficulty))
+            total.saturating_add(Self::block_work(block.header.target))
         })
+    }
+
+    pub fn next_target(&self) -> u64 {
+        Self::expected_target_for_chain(&self.params, &self.chain)
+    }
+
+    pub fn next_difficulty_bits(&self) -> u32 {
+        Block::target_difficulty_bits(self.next_target())
+    }
+
+    fn block_work(target: u64) -> u128 {
+        let space = u128::from(u64::MAX) + 1;
+        space / (u128::from(target) + 1)
+    }
+
+    fn expected_target_for_chain(params: &ChainParams, chain: &[Block]) -> u64 {
+        let Some(tip) = chain.last() else {
+            return params.initial_target;
+        };
+        if tip.index < params.retarget_interval_blocks.saturating_mul(2)
+            || tip.index % params.retarget_interval_blocks != 0
+        {
+            return if tip.index == 0 { params.initial_target } else { tip.header.target };
+        }
+
+        let offset = params.retarget_interval_blocks as usize;
+        let Some(start) = chain.len().checked_sub(offset + 1).and_then(|index| chain.get(index)) else {
+            return tip.header.target;
+        };
+        let actual_ms = tip.header.timestamp.saturating_sub(start.header.timestamp) as u128;
+        let expected_ms = u128::from(params.target_block_time_seconds)
+            .saturating_mul(1_000)
+            .saturating_mul(u128::from(params.retarget_interval_blocks));
+        if expected_ms == 0 {
+            return tip.header.target;
+        }
+        let factor = u128::from(params.max_retarget_factor.max(1));
+        let observed_ms = actual_ms.clamp(expected_ms / factor, expected_ms.saturating_mul(factor));
+        let next = u128::from(tip.header.target)
+            .saturating_mul(observed_ms)
+            / expected_ms;
+        next.clamp(1, u128::from(u64::MAX)) as u64
     }
 
     /// Troca a cadeia somente quando a candidata é válida e tem mais trabalho.
@@ -223,7 +267,7 @@ impl Blockchain {
     pub fn replace_if_heavier(&mut self, candidate: Vec<Block>) -> Result<bool> {
         let candidate_utxo = Self::validate_chain_and_build_utxo(&self.params, &candidate)?;
         let candidate_work = candidate.iter().skip(1).fold(0u128, |total, block| {
-            total.saturating_add(16u128.saturating_pow(block.header.difficulty))
+            total.saturating_add(Self::block_work(block.header.target))
         });
         let local_work = self.cumulative_work();
         let candidate_tip = candidate
@@ -259,7 +303,8 @@ impl Blockchain {
             ));
         }
         let mut utxo = self.utxo_set.clone();
-        Self::validate_and_apply_non_genesis_block(&self.params, block, &mut utxo)?;
+        let expected_target = self.next_target();
+        Self::validate_and_apply_non_genesis_block(&self.params, expected_target, block, &mut utxo)?;
         Ok(utxo)
     }
 
@@ -300,13 +345,15 @@ impl Blockchain {
                     block.index
                 )));
             }
-            Self::validate_and_apply_non_genesis_block(params, block, &mut utxo)?;
+            let expected_target = Self::expected_target_for_chain(params, &chain[..index]);
+            Self::validate_and_apply_non_genesis_block(params, expected_target, block, &mut utxo)?;
         }
         Ok(utxo)
     }
 
     fn validate_and_apply_non_genesis_block(
         params: &ChainParams,
+        expected_target: u64,
         block: &Block,
         utxo: &mut HashMap<UtxoKey, TxOutput>,
     ) -> Result<()> {
@@ -316,9 +363,9 @@ impl Blockchain {
                 block.index
             )));
         }
-        if block.header.difficulty != params.difficulty {
+        if block.header.target != expected_target {
             return Err(WynError::Validation(format!(
-                "dificuldade inválida no bloco {}",
+                "alvo PoW inválido no bloco {}",
                 block.index
             )));
         }
@@ -501,9 +548,11 @@ mod tests {
     fn params() -> ChainParams {
         ChainParams {
             network_id: "test-network".into(),
-            difficulty: 1,
+            initial_target: u64::MAX,
             block_reward: 5_000_000_000,
-            target_block_time_seconds: 60,
+            target_block_time_seconds: 1,
+            retarget_interval_blocks: 2,
+            max_retarget_factor: 4,
             max_transactions_per_block: 100,
         }
     }
@@ -573,5 +622,23 @@ mod tests {
         assert!(local.replace_if_heavier(remote.chain.clone()).unwrap());
         assert_eq!(local.height(), 2);
         assert!(!local.replace_if_heavier(remote.chain).unwrap());
+    }
+
+    #[test]
+    fn retarget_reduces_target_after_a_fast_window() {
+        let wallet = Wallet::generate().unwrap();
+        let mut params = params();
+        params.initial_target = u64::MAX / 2;
+        let mut blockchain = Blockchain::new(params.clone());
+        let base = blockchain.last_block().header.timestamp;
+
+        for offset in 1..=4 {
+            let mut candidate = blockchain.build_candidate_block(&wallet.address).unwrap();
+            candidate.header.timestamp = base + offset;
+            candidate.mine().unwrap();
+            blockchain.commit_block(candidate).unwrap();
+        }
+
+        assert!(blockchain.next_target() < params.initial_target);
     }
 }

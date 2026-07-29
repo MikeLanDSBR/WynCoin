@@ -59,7 +59,8 @@ fn run() -> Result<()> {
             println!("  rede       : {}", status.network_id);
             println!("  altura     : {}", status.height);
             println!("  topo       : {}", status.tip_hash);
-            println!("  dificuldade: {}", status.difficulty);
+            println!("  dificuldade: {} bits", status.difficulty);
+            println!("  alvo PoW    : {}", status.target);
             println!("  recompensa : {} WYN", format_wyn(status.block_reward));
             println!("  mempool    : {}", status.mempool_size);
             println!("  mineração  : {}", status.mining_enabled);

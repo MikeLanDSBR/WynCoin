@@ -112,6 +112,7 @@ pub struct NodeStatus {
     pub height: u64,
     pub tip_hash: String,
     pub difficulty: u32,
+    pub target: String,
     pub block_reward: u64,
     pub mempool_size: usize,
     pub mining_enabled: bool,

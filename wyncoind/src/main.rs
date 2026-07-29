@@ -79,9 +79,11 @@ fn run() -> Result<()> {
 
     let params = ChainParams {
         network_id: config.network.id.clone(),
-        difficulty: config.chain.difficulty,
+        initial_target: config.chain.initial_target,
         block_reward: config.chain.block_reward,
         target_block_time_seconds: config.chain.target_block_time_seconds,
+        retarget_interval_blocks: config.chain.retarget_interval_blocks,
+        max_retarget_factor: config.chain.max_retarget_factor,
         max_transactions_per_block: config.chain.max_transactions_per_block,
     };
 
@@ -801,7 +803,8 @@ fn status_response(runtime: &Arc<Mutex<NodeRuntime>>) -> Result<ApiResponse> {
             network_id: state.blockchain.params.network_id.clone(),
             height: state.blockchain.height(),
             tip_hash: state.blockchain.last_block().hash.clone(),
-            difficulty: state.blockchain.params.difficulty,
+            difficulty: state.blockchain.next_difficulty_bits(),
+            target: state.blockchain.next_target().to_string(),
             block_reward: state.blockchain.params.block_reward,
             mempool_size: state.blockchain.mempool.len(),
             mining_enabled: state.mining_enabled,

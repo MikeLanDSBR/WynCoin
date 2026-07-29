@@ -57,10 +57,12 @@ impl Default for P2pConfig {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ChainConfig {
-    pub difficulty: u32,
+    /// Alvo PoW inicial sobre os primeiros 64 bits do hash. Menor é mais difícil.
+    pub initial_target: u64,
     pub block_reward: u64,
-    #[serde(alias = "min_block_interval_seconds")]
     pub target_block_time_seconds: u64,
+    pub retarget_interval_blocks: u64,
+    pub max_retarget_factor: u64,
     pub max_transactions_per_block: usize,
 }
 
@@ -91,9 +93,11 @@ impl Default for NodeConfig {
             },
             p2p: P2pConfig::default(),
             chain: ChainConfig {
-                difficulty: 4,
+                initial_target: 1_099_511_627_775,
                 block_reward: 5_000_000_000,
                 target_block_time_seconds: 60,
+                retarget_interval_blocks: 20,
+                max_retarget_factor: 4,
                 max_transactions_per_block: 100,
             },
             mining: MiningConfig {
@@ -178,9 +182,9 @@ impl NodeConfig {
                     .map_err(|_| WynError::Config(format!("seed P2P inválido: {seed}")))?;
             }
         }
-        if !(1..=8).contains(&self.chain.difficulty) {
+        if self.chain.initial_target == 0 {
             return Err(WynError::Config(
-                "chain.difficulty deve estar entre 1 e 8".into(),
+                "chain.initial_target deve ser maior que zero".into(),
             ));
         }
         if self.chain.block_reward == 0 {
@@ -191,6 +195,16 @@ impl NodeConfig {
         if !(1..=86_400).contains(&self.chain.target_block_time_seconds) {
             return Err(WynError::Config(
                 "chain.target_block_time_seconds deve estar entre 1 e 86400".into(),
+            ));
+        }
+        if !(2..=10_000).contains(&self.chain.retarget_interval_blocks) {
+            return Err(WynError::Config(
+                "chain.retarget_interval_blocks deve estar entre 2 e 10000".into(),
+            ));
+        }
+        if !(2..=16).contains(&self.chain.max_retarget_factor) {
+            return Err(WynError::Config(
+                "chain.max_retarget_factor deve estar entre 2 e 16".into(),
             ));
         }
         if self.chain.max_transactions_per_block == 0 {

@@ -16,7 +16,9 @@ pub struct BlockHeader {
     pub prev_hash: String,
     pub merkle_root: String,
     pub timestamp: i64,
-    pub difficulty: u32,
+    /// Alvo PoW: os primeiros 64 bits do hash devem ser menores ou iguais.
+    /// Menor alvo significa mais trabalho necessário.
+    pub target: u64,
     pub nonce: u64,
 }
 
@@ -38,7 +40,7 @@ impl Block {
                 prev_hash: ZERO_HASH.to_string(),
                 merkle_root: ZERO_HASH.to_string(),
                 timestamp: 1_753_660_800_000,
-                difficulty: 0,
+                target: 0,
                 nonce: 0,
             },
             hash: String::new(),
@@ -53,7 +55,7 @@ impl Block {
         index: u64,
         prev_hash: String,
         transactions: Vec<Transaction>,
-        difficulty: u32,
+        target: u64,
     ) -> Result<Self> {
         let merkle_root = Self::compute_merkle_root(&transactions)?;
         let mut block = Self {
@@ -64,7 +66,7 @@ impl Block {
                 prev_hash,
                 merkle_root,
                 timestamp: Utc::now().timestamp_millis(),
-                difficulty,
+                target,
                 nonce: 0,
             },
             hash: String::new(),
@@ -82,7 +84,7 @@ impl Block {
             &self.header.prev_hash,
             &self.header.merkle_root,
             self.header.timestamp,
-            self.header.difficulty,
+            self.header.target,
             self.header.nonce,
         ))
         .expect("serialização do cabeçalho não pode falhar");
@@ -93,15 +95,14 @@ impl Block {
     }
 
     pub fn mine(&mut self) -> Result<()> {
-        if self.header.difficulty == 0 || self.header.difficulty > 64 {
+        if self.header.target == 0 {
             return Err(WynError::Validation(
-                "dificuldade inválida para Proof of Work".into(),
+                "alvo inválido para Proof of Work".into(),
             ));
         }
-        let prefix = "0".repeat(self.header.difficulty as usize);
         loop {
             self.hash = self.compute_hash();
-            if self.hash.starts_with(&prefix) {
+            if self.has_valid_target_hash() {
                 return Ok(());
             }
             self.header.nonce = self
@@ -113,11 +114,26 @@ impl Block {
     }
 
     pub fn is_valid_pow(&self) -> bool {
-        if self.header.difficulty == 0 || self.header.difficulty > 64 {
+        if self.header.target == 0 {
             return false;
         }
-        let prefix = "0".repeat(self.header.difficulty as usize);
-        self.hash == self.compute_hash() && self.hash.starts_with(&prefix)
+        self.hash == self.compute_hash() && self.has_valid_target_hash()
+    }
+
+    fn has_valid_target_hash(&self) -> bool {
+        let Some(prefix) = self.hash.get(..16) else {
+            return false;
+        };
+        u64::from_str_radix(prefix, 16)
+            .map(|value| value <= self.header.target)
+            .unwrap_or(false)
+    }
+
+    pub fn target_difficulty_bits(target: u64) -> u32 {
+        if target == 0 {
+            return 64;
+        }
+        target.leading_zeros()
     }
 
     pub fn has_valid_merkle_root(&self) -> Result<bool> {
