@@ -24,6 +24,17 @@ enum Command {
     },
     Block { height: u64 },
     Mempool,
+    Mining {
+        #[command(subcommand)]
+        action: MiningCommand,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum MiningCommand {
+    Status,
+    On,
+    Off,
 }
 
 fn main() {
@@ -88,6 +99,17 @@ fn run() -> Result<()> {
             let response = send_request(&args.node, &Request::Mempool)?;
             let transactions: Vec<Transaction> = response.require_data()?;
             println!("{}", serde_json::to_string_pretty(&transactions)?);
+        }
+        Command::Mining { action } => {
+            let request = match action {
+                MiningCommand::Status => Request::MiningStatus,
+                MiningCommand::On => Request::SetMining { enabled: true },
+                MiningCommand::Off => Request::SetMining { enabled: false },
+            };
+            let response = send_request(&args.node, &request)?;
+            let enabled: bool = response.require_data()?;
+            println!("Mineração {}.", if enabled { "ativada" } else { "desativada" });
+            println!("A mudança vale até o próximo restart do wyncoind.");
         }
     }
     Ok(())

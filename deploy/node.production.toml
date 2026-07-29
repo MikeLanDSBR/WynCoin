@@ -9,7 +9,7 @@ min_block_interval_seconds = 60
 max_transactions_per_block = 100
 
 [mining]
-enabled = true
+enabled = false
 mine_empty_blocks = true
 interval_seconds = 60
 miner_wallet = "/var/lib/wyncoin/wallets/miner.json"

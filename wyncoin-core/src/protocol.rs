@@ -46,6 +46,8 @@ pub enum Request {
     Blocks { limit: usize },
     Block { height: u64 },
     Mempool,
+    MiningStatus,
+    SetMining { enabled: bool },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

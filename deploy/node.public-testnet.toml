@@ -16,7 +16,7 @@ target_block_time_seconds = 60
 max_transactions_per_block = 100
 
 [mining]
-enabled = true
+enabled = false
 mine_empty_blocks = true
 interval_seconds = 60
 miner_address = "__WYNCOIN_MINER_ADDRESS__"

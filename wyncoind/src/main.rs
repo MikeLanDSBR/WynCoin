@@ -746,6 +746,17 @@ fn handle_request_inner(
         Request::Mempool => with_state(runtime, |state| {
             Ok(ApiResponse::success(state.blockchain.mempool.clone()))
         }),
+        Request::MiningStatus => with_state(runtime, |state| {
+            Ok(ApiResponse::success(state.mining_enabled))
+        }),
+        Request::SetMining { enabled } => {
+            let mut state = runtime
+                .lock()
+                .map_err(|_| WynError::Protocol("estado do nó foi envenenado".into()))?;
+            state.mining_enabled = enabled;
+            println!("[miner] mineração {} pela API local", if enabled { "ativada" } else { "desativada" });
+            Ok(ApiResponse::success(state.mining_enabled))
+        }
     }
 }
 

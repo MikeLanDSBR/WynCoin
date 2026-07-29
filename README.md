@@ -151,6 +151,17 @@ wyncoin wallet info
 wyncoin wallet balance
 ```
 
+Controle temporário da mineração, sem reiniciar o nó:
+
+```bash
+wyncoin mining status
+wyncoin mining off
+wyncoin mining on
+```
+
+Esse controle vale somente até o próximo restart do `wyncoind`; a configuração
+em `/etc/wyncoin/node.toml` continua sendo a política persistente.
+
 Uma carteira pessoal é um arquivo JSON que contém a chave privada. Para criar
 ou usar outra carteira:
 
