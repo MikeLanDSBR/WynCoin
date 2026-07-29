@@ -427,7 +427,22 @@ fn handle_p2p_inbound(
                 accept_remote_block(&runtime, block)?;
             }
             P2pMessage::AnnounceTransaction { transaction } => {
-                let _ = submit_p2p_transaction(&runtime, transaction);
+                if let Err(error) = submit_p2p_transaction(&runtime, transaction) {
+                    eprintln!("[p2p] transação rejeitada: {error}");
+                }
+            }
+            P2pMessage::GetMempool => {
+                let transactions = with_p2p_state(&runtime, |state| {
+                    Ok(state.blockchain.mempool.clone())
+                })?;
+                write_p2p(&mut stream, &P2pMessage::Mempool { transactions })?;
+            }
+            P2pMessage::Mempool { transactions } => {
+                for transaction in transactions {
+                    if let Err(error) = submit_p2p_transaction(&runtime, transaction) {
+                        eprintln!("[p2p] transação de mempool rejeitada: {error}");
+                    }
+                }
             }
             // Um nó atrás de NAT pode iniciar a conexão e enviar a própria
             // chain maior. Isso torna a sincronização realmente bidirecional.
@@ -514,6 +529,7 @@ fn synchronize_peer(
         return Ok(true);
     }
     if remote.height == local_height && remote.tip_hash == local_tip {
+        pull_mempool_from_peer(&mut stream, &mut reader, runtime)?;
         return Ok(false);
     }
     let mut all_blocks = Vec::new();
@@ -546,7 +562,25 @@ fn synchronize_peer(
     if replaced {
         println!("[p2p] chain sincronizada de {address}");
     }
+    pull_mempool_from_peer(&mut stream, &mut reader, runtime)?;
     Ok(replaced)
+}
+
+fn pull_mempool_from_peer(
+    stream: &mut TcpStream,
+    reader: &mut BufReader<TcpStream>,
+    runtime: &Arc<Mutex<NodeRuntime>>,
+) -> Result<()> {
+    write_p2p(stream, &P2pMessage::GetMempool)?;
+    let Some(P2pMessage::Mempool { transactions }) = read_p2p(reader)? else {
+        return Err(WynError::Protocol("peer respondeu mempool inválido".into()));
+    };
+    for transaction in transactions {
+        if let Err(error) = submit_p2p_transaction(runtime, transaction) {
+            eprintln!("[p2p] transação de mempool rejeitada: {error}");
+        }
+    }
+    Ok(())
 }
 
 fn replace_chain_from_peer(runtime: &Arc<Mutex<NodeRuntime>>, blocks: Vec<Block>) -> Result<bool> {

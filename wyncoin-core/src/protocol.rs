@@ -21,6 +21,8 @@ pub enum P2pMessage {
     Blocks { blocks: Vec<Block>, has_more: bool },
     AnnounceBlock { block: Block },
     AnnounceTransaction { transaction: Transaction },
+    GetMempool,
+    Mempool { transactions: Vec<Transaction> },
     Peers { peers: Vec<String> },
     Error { message: String },
 }
