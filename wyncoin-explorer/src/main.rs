@@ -223,6 +223,32 @@ struct TransactionsPage {
     total_transactions: usize,
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum TransactionFilter {
+    All,
+    Regular,
+    Coinbase,
+}
+
+impl TransactionFilter {
+    fn from_query(value: Option<&String>) -> Result<Self> {
+        match value.map(String::as_str).unwrap_or("all") {
+            "all" => Ok(Self::All),
+            "regular" => Ok(Self::Regular),
+            "coinbase" => Ok(Self::Coinbase),
+            _ => Err(WynError::Validation(
+                "type deve ser all, regular ou coinbase".into(),
+            )),
+        }
+    }
+
+    fn includes(self, transaction: &Transaction) -> bool {
+        matches!(self, Self::All)
+            || matches!(self, Self::Regular) && !transaction.is_coinbase
+            || matches!(self, Self::Coinbase) && transaction.is_coinbase
+    }
+}
+
 #[derive(Serialize)]
 struct AddressActivity {
     transaction_id: String,
@@ -662,7 +688,9 @@ fn api_status(
             .and_then(|(newest, oldest)| {
                 let intervals = recent_blocks.len().checked_sub(1)? as i64;
                 let elapsed = newest.header.timestamp.checked_sub(oldest.header.timestamp)?;
-                (intervals > 0 && elapsed >= 0).then(|| (elapsed / intervals) as u64)
+                // O cabeçalho guarda milissegundos desde Unix epoch; a API
+                // expõe o ritmo em segundos para a interface.
+                (intervals > 0 && elapsed >= 0).then(|| (elapsed / intervals / 1_000) as u64)
             });
 
         Ok(ExplorerStatus {
@@ -766,9 +794,10 @@ fn api_transactions(
             .get("before_height")
             .and_then(|value| value.parse::<u64>().ok())
             .unwrap_or(snapshot.status.height);
+        let filter = TransactionFilter::from_query(query.get("type"))?;
         let mut items = Vec::with_capacity(limit);
         for block in snapshot.blocks.iter().rev().filter(|block| block.index <= before_height) {
-            for transaction in block.transactions.iter().rev() {
+            for transaction in block.transactions.iter().rev().filter(|transaction| filter.includes(transaction)) {
                 items.push(TransactionLocation {
                     transaction: transaction_view(transaction, Some(block.index), snapshot.status.height)?,
                     block: Some(block_summary(block)?),
@@ -791,7 +820,9 @@ fn api_transactions(
             total_transactions: snapshot
                 .blocks
                 .iter()
-                .map(|block| block.transactions.len())
+                .flat_map(|block| &block.transactions)
+                .filter(|transaction| filter.includes(transaction))
+                .count(),
                 .sum(),
         })
     })
