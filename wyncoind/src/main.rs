@@ -381,18 +381,23 @@ fn write_p2p(stream: &mut TcpStream, message: &P2pMessage) -> Result<()> {
     Ok(())
 }
 
-fn read_p2p(reader: &mut BufReader<TcpStream>) -> Result<P2pMessage> {
+/// `None` representa EOF limpo: o peer concluiu sua troca de mensagens e
+/// fechou a conexão. Isso não é um protocolo inválido.
+fn read_p2p(reader: &mut BufReader<TcpStream>) -> Result<Option<P2pMessage>> {
     let mut body = Vec::new();
     reader
         .by_ref()
         .take((MAX_P2P_MESSAGE_BYTES + 1) as u64)
         .read_until(b'\n', &mut body)?;
-    if body.is_empty() || body.len() > MAX_P2P_MESSAGE_BYTES {
+    if body.is_empty() {
+        return Ok(None);
+    }
+    if body.len() > MAX_P2P_MESSAGE_BYTES {
         return Err(WynError::Protocol(
             "mensagem P2P vazia ou excede o limite".into(),
         ));
     }
-    Ok(serde_json::from_slice(&body)?)
+    Ok(Some(serde_json::from_slice(&body)?))
 }
 
 fn handle_p2p_inbound(
@@ -403,7 +408,7 @@ fn handle_p2p_inbound(
     stream.set_read_timeout(Some(Duration::from_secs(15)))?;
     stream.set_write_timeout(Some(Duration::from_secs(15)))?;
     let mut reader = BufReader::new(stream.try_clone()?);
-    let P2pMessage::Hello(remote) = read_p2p(&mut reader)? else {
+    let Some(P2pMessage::Hello(remote)) = read_p2p(&mut reader)? else {
         return Err(WynError::Protocol("handshake P2P ausente".into()));
     };
     let hello = {
@@ -419,7 +424,10 @@ fn handle_p2p_inbound(
         remember_peer(&runtime, address);
     }
     loop {
-        match read_p2p(&mut reader)? {
+        let Some(message) = read_p2p(&mut reader)? else {
+            return Ok(());
+        };
+        match message {
             P2pMessage::GetBlocks {
                 start_height,
                 limit,
@@ -479,7 +487,7 @@ fn synchronize_peer(
     let local = with_p2p_state(runtime, |state| Ok(peer_hello(state)))?;
     write_p2p(&mut stream, &P2pMessage::Hello(local))?;
     let mut reader = BufReader::new(stream.try_clone()?);
-    let P2pMessage::Hello(remote) = read_p2p(&mut reader)? else {
+    let Some(P2pMessage::Hello(remote)) = read_p2p(&mut reader)? else {
         return Err(WynError::Protocol("peer não respondeu handshake".into()));
     };
     with_p2p_state(runtime, |state| validate_peer_hello(&remote, state))?;
@@ -487,7 +495,7 @@ fn synchronize_peer(
         remember_peer(runtime, peer_address);
     }
     write_p2p(&mut stream, &P2pMessage::Peers { peers: Vec::new() })?;
-    if let P2pMessage::Peers { peers } = read_p2p(&mut reader)? {
+    if let Some(P2pMessage::Peers { peers }) = read_p2p(&mut reader)? {
         for peer in peers.into_iter().take(32) {
             if peer.parse::<SocketAddr>().is_ok() {
                 remember_peer(runtime, &peer);
@@ -515,7 +523,7 @@ fn synchronize_peer(
                 limit: 100,
             },
         )?;
-        let P2pMessage::Blocks { blocks, has_more } = read_p2p(&mut reader)? else {
+        let Some(P2pMessage::Blocks { blocks, has_more }) = read_p2p(&mut reader)? else {
             return Err(WynError::Protocol(
                 "peer respondeu sincronização inválida".into(),
             ));
@@ -624,7 +632,7 @@ fn broadcast_p2p(runtime: &Arc<Mutex<NodeRuntime>>, message: P2pMessage) {
             let Ok(mut reader) = stream.try_clone().map(BufReader::new) else {
                 continue;
             };
-            if !matches!(read_p2p(&mut reader), Ok(P2pMessage::Hello(_))) {
+            if !matches!(read_p2p(&mut reader), Ok(Some(P2pMessage::Hello(_)))) {
                 continue;
             }
             let _ = write_p2p(&mut stream, &message);
