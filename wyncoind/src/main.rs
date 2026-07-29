@@ -583,6 +583,16 @@ fn accept_remote_block(runtime: &Arc<Mutex<NodeRuntime>>, block: Block) -> Resul
     let mut state = runtime
         .lock()
         .map_err(|_| WynError::Protocol("estado do nó foi envenenado".into()))?;
+    if let Some(existing) = state.blockchain.chain.get(block.index as usize) {
+        if existing.hash == block.hash {
+            // Anúncios P2P podem retornar ao próprio originador. A mesma
+            // unidade já confirmada não é erro nem precisa ser persistida.
+            return Ok(());
+        }
+        return Err(WynError::Validation(
+            "fork recebido na mesma altura; aguardando sincronização da chain".into(),
+        ));
+    }
     let mut next = state.blockchain.clone();
     next.commit_block(block.clone())?;
     state.storage.append_block(&block)?;
