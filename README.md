@@ -130,17 +130,44 @@ A altura e os saldos devem continuar iguais depois da reinicialização.
 Em um VPS Debian/Ubuntu:
 
 ```bash
-sudo ./scripts/install-service.sh
+./scripts/install-service.sh
 sudo systemctl status wyncoind
+sudo systemctl status wyncoin-explorer
 sudo journalctl -u wyncoind -f
 ```
+
+O instalador mantém o nó e o Explorer ativos no boot. O Explorer fica disponível
+somente no próprio servidor em `http://127.0.0.1:8080`; use túnel SSH ou um
+proxy autenticado caso precise acessá-lo de outra máquina.
 
 Comandos instalados:
 
 ```bash
 /opt/wyncoin/bin/wyncoin-cli status
 /opt/wyncoin/bin/wyncoin-wallet balance --address WYN...
+wyncoin status
+wyncoin blocks --limit 5
 ```
+
+## Atualizar ou zerar
+
+Para compilar uma nova versão, instalar os binários e reiniciar os dois
+serviços sem apagar a configuração, a blockchain ou as carteiras:
+
+```bash
+./scripts/update-service.sh
+```
+
+Para zerar ambientes, use o menu interativo:
+
+```bash
+./scripts/wipe.sh
+```
+
+`local` remove somente a chain e as carteiras ativas em `data/`, preservando
+`data/node.toml` e backups em `data/archive/`. `service` exige `sudo` e remove
+os serviços, binários, configuração e dados de produção em `/var/lib/wyncoin`.
+As duas operações exigem confirmação textual explícita.
 
 A API permanece apenas em `127.0.0.1:9332`. Não altere para `0.0.0.0` nesta
 versão: o protocolo ainda não possui autenticação nem TLS.
