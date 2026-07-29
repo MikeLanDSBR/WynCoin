@@ -22,7 +22,7 @@ pub struct ChainParams {
     pub network_id: String,
     pub difficulty: u32,
     pub block_reward: u64,
-    pub min_block_interval_seconds: u64,
+    pub target_block_time_seconds: u64,
     pub max_transactions_per_block: usize,
 }
 
@@ -203,7 +203,7 @@ impl Blockchain {
         hasher.update(self.params.network_id.as_bytes());
         hasher.update(self.params.difficulty.to_le_bytes());
         hasher.update(self.params.block_reward.to_le_bytes());
-        hasher.update(self.params.min_block_interval_seconds.to_le_bytes());
+        hasher.update(self.params.target_block_time_seconds.to_le_bytes());
         hasher.update((self.params.max_transactions_per_block as u64).to_le_bytes());
         hex::encode(hasher.finalize())
     }
@@ -258,8 +258,6 @@ impl Blockchain {
                 "timestamp anterior ao bloco precedente".into(),
             ));
         }
-        Self::validate_min_block_interval(&self.params, previous, block)?;
-
         let mut utxo = self.utxo_set.clone();
         Self::validate_and_apply_non_genesis_block(&self.params, block, &mut utxo)?;
         Ok(utxo)
@@ -302,33 +300,9 @@ impl Blockchain {
                     block.index
                 )));
             }
-            Self::validate_min_block_interval(params, previous, block)?;
             Self::validate_and_apply_non_genesis_block(params, block, &mut utxo)?;
         }
         Ok(utxo)
-    }
-
-    fn validate_min_block_interval(
-        params: &ChainParams,
-        previous: &Block,
-        block: &Block,
-    ) -> Result<()> {
-        let interval_ms = i64::try_from(params.min_block_interval_seconds)
-            .ok()
-            .and_then(|seconds| seconds.checked_mul(1_000))
-            .ok_or_else(|| WynError::Validation("intervalo mínimo de bloco inválido".into()))?;
-        let earliest_timestamp = previous
-            .header
-            .timestamp
-            .checked_add(interval_ms)
-            .ok_or_else(|| WynError::Validation("timestamp mínimo de bloco excedido".into()))?;
-        if block.header.timestamp < earliest_timestamp {
-            return Err(WynError::Validation(format!(
-                "bloco {} confirmado antes do intervalo mínimo de {} segundos",
-                block.index, params.min_block_interval_seconds
-            )));
-        }
-        Ok(())
     }
 
     fn validate_and_apply_non_genesis_block(
@@ -529,7 +503,7 @@ mod tests {
             network_id: "test-network".into(),
             difficulty: 1,
             block_reward: 5_000_000_000,
-            min_block_interval_seconds: 0,
+            target_block_time_seconds: 60,
             max_transactions_per_block: 100,
         }
     }
@@ -576,20 +550,14 @@ mod tests {
     }
 
     #[test]
-    fn rejects_block_before_minimum_interval() {
+    fn accepts_blocks_without_a_hard_time_gate() {
         let wallet = Wallet::generate().unwrap();
-        let mut params = params();
-        params.min_block_interval_seconds = 60;
-        let mut blockchain = Blockchain::new(params);
+        let mut blockchain = Blockchain::new(params());
         blockchain.mine_and_commit(&wallet.address).unwrap();
 
         let mut candidate = blockchain.build_candidate_block(&wallet.address).unwrap();
         candidate.mine().unwrap();
-        let error = blockchain.commit_block(candidate).unwrap_err();
-
-        assert!(error
-            .to_string()
-            .contains("confirmado antes do intervalo mínimo"));
+        blockchain.commit_block(candidate).unwrap();
     }
 
     #[test]

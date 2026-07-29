@@ -29,7 +29,6 @@ struct NodeRuntime {
     storage: Storage,
     mining_enabled: bool,
     mine_empty_blocks: bool,
-    min_block_interval_seconds: u64,
     miner_address: String,
     p2p_enabled: bool,
     p2p_ready: bool,
@@ -82,7 +81,7 @@ fn run() -> Result<()> {
         network_id: config.network.id.clone(),
         difficulty: config.chain.difficulty,
         block_reward: config.chain.block_reward,
-        min_block_interval_seconds: config.chain.min_block_interval_seconds,
+        target_block_time_seconds: config.chain.target_block_time_seconds,
         max_transactions_per_block: config.chain.max_transactions_per_block,
     };
 
@@ -97,7 +96,6 @@ fn run() -> Result<()> {
         storage,
         mining_enabled: config.mining.enabled,
         mine_empty_blocks: config.mining.mine_empty_blocks,
-        min_block_interval_seconds: config.chain.min_block_interval_seconds,
         miner_address: miner_address.clone(),
         p2p_enabled: config.p2p.enabled,
         p2p_ready: !config.p2p.enabled,
@@ -161,25 +159,17 @@ fn spawn_miner(
 ) -> thread::JoinHandle<()> {
     thread::spawn(move || {
         while !stop.load(Ordering::SeqCst) {
-            let (should_mine, wait) = match runtime.lock() {
+            let should_mine = match runtime.lock() {
                 Ok(state) => {
                     let should_mine = state.mining_enabled
                         && (!state.p2p_enabled || state.p2p_ready)
                         && (state.mine_empty_blocks || !state.blockchain.mempool.is_empty());
-                    let wait = if should_mine {
-                        mining_window_wait(&state).unwrap_or_else(|error| {
-                            eprintln!("[miner] relógio inválido: {error}");
-                            Duration::from_secs(interval_seconds.max(1))
-                        })
-                    } else {
-                        Duration::from_secs(interval_seconds.max(1))
-                    };
-                    (should_mine, wait)
+                    should_mine
                 }
-                Err(_) => (false, Duration::from_secs(interval_seconds.max(1))),
+                Err(_) => false,
             };
 
-            if should_mine && wait.is_zero() {
+            if should_mine {
                 match mine_one(&runtime) {
                     Ok(block) => println!(
                         "[miner] bloco #{} confirmado: {}",
@@ -193,14 +183,7 @@ fn spawn_miner(
                 }
             }
 
-            // O relógio da mineração acompanha o timestamp do topo, não o
-            // instante em que o processo iniciou. Assim todos os nós chegam
-            // à próxima janela de consenso, mesmo após sincronizarem tarde.
-            let wait = if should_mine && wait.is_zero() {
-                Duration::from_millis(50)
-            } else {
-                wait
-            };
+            let wait = if should_mine { Duration::from_millis(50) } else { Duration::from_secs(interval_seconds.max(1)) };
             let start = Instant::now();
             while start.elapsed() < wait && !stop.load(Ordering::SeqCst) {
                 thread::sleep(Duration::from_millis(200));
@@ -214,7 +197,6 @@ fn mine_one(runtime: &Arc<Mutex<NodeRuntime>>) -> Result<Block> {
         let state = runtime
             .lock()
             .map_err(|_| WynError::Protocol("estado do nó foi envenenado".into()))?;
-        ensure_mining_window(&state)?;
         (
             state
                 .blockchain
@@ -248,45 +230,6 @@ fn mine_one(runtime: &Arc<Mutex<NodeRuntime>>) -> Result<Block> {
     Ok(candidate)
 }
 
-fn ensure_mining_window(state: &NodeRuntime) -> Result<()> {
-    let wait = mining_window_wait(state)?;
-    if !wait.is_zero() {
-        let remaining_ms = wait.as_millis();
-        return Err(WynError::Validation(format!(
-            "próximo bloco liberado em {} ms",
-            remaining_ms
-        )));
-    }
-    Ok(())
-}
-
-fn mining_window_wait(state: &NodeRuntime) -> Result<Duration> {
-    let interval_ms = i64::try_from(state.min_block_interval_seconds)
-        .ok()
-        .and_then(|seconds| seconds.checked_mul(1_000))
-        .ok_or_else(|| WynError::Validation("intervalo mínimo de bloco inválido".into()))?;
-    let next_timestamp = state
-        .blockchain
-        .last_block()
-        .header
-        .timestamp
-        .checked_add(interval_ms)
-        .ok_or_else(|| WynError::Validation("timestamp mínimo de bloco excedido".into()))?;
-    let now = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_err(|_| WynError::Validation("relógio do sistema anterior ao Unix epoch".into()))?
-        .as_millis();
-    let now =
-        i64::try_from(now).map_err(|_| WynError::Validation("timestamp atual inválido".into()))?;
-
-    if now >= next_timestamp {
-        return Ok(Duration::ZERO);
-    }
-    let remaining_ms = next_timestamp - now;
-    Ok(Duration::from_millis(u64::try_from(remaining_ms).map_err(|_| {
-        WynError::Validation("tempo de espera da mineração inválido".into())
-    })?))
-}
 
 fn spawn_p2p(
     runtime: Arc<Mutex<NodeRuntime>>,

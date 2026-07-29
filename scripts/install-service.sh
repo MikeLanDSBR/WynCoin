@@ -37,6 +37,9 @@ fi
 
 sudo install -d -o root -g root -m 0755 /opt/wyncoin/bin
 sudo install -d -o root -g wyncoin -m 0750 /etc/wyncoin
+# O usuário de sistema pode sobreviver a um wipe; recrie também o diretório
+# pai para que SQLite consiga criar o banco na reinstalação.
+sudo install -d -o wyncoin -g wyncoin -m 0700 /var/lib/wyncoin
 sudo install -d -o wyncoin -g wyncoin -m 0700 /var/lib/wyncoin/wallets
 
 sudo install -o root -g root -m 0755 target/release/wyncoind /opt/wyncoin/bin/wyncoind

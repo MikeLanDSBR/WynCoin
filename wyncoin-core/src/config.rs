@@ -59,7 +59,8 @@ impl Default for P2pConfig {
 pub struct ChainConfig {
     pub difficulty: u32,
     pub block_reward: u64,
-    pub min_block_interval_seconds: u64,
+    #[serde(alias = "min_block_interval_seconds")]
+    pub target_block_time_seconds: u64,
     pub max_transactions_per_block: usize,
 }
 
@@ -92,7 +93,7 @@ impl Default for NodeConfig {
             chain: ChainConfig {
                 difficulty: 4,
                 block_reward: 5_000_000_000,
-                min_block_interval_seconds: 60,
+                target_block_time_seconds: 60,
                 max_transactions_per_block: 100,
             },
             mining: MiningConfig {
@@ -187,9 +188,9 @@ impl NodeConfig {
                 "block_reward deve ser maior que zero".into(),
             ));
         }
-        if !(1..=86_400).contains(&self.chain.min_block_interval_seconds) {
+        if !(1..=86_400).contains(&self.chain.target_block_time_seconds) {
             return Err(WynError::Config(
-                "chain.min_block_interval_seconds deve estar entre 1 e 86400".into(),
+                "chain.target_block_time_seconds deve estar entre 1 e 86400".into(),
             ));
         }
         if self.chain.max_transactions_per_block == 0 {
