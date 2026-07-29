@@ -292,6 +292,11 @@ button {
   color: #ffd3d3;
 }
 
+/* O display flex acima substituiria o comportamento nativo do atributo hidden. */
+.connection-alert[hidden] {
+  display: none;
+}
+
 .connection-alert span {
   flex: 1;
   color: #d8aaa8;

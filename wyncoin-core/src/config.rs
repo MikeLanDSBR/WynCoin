@@ -24,6 +24,7 @@ pub struct NetworkConfig {
 pub struct ChainConfig {
     pub difficulty: u32,
     pub block_reward: u64,
+    pub min_block_interval_seconds: u64,
     pub max_transactions_per_block: usize,
 }
 
@@ -50,6 +51,7 @@ impl Default for NodeConfig {
             chain: ChainConfig {
                 difficulty: 4,
                 block_reward: 5_000_000_000,
+                min_block_interval_seconds: 60,
                 max_transactions_per_block: 100,
             },
             mining: MiningConfig {
@@ -118,6 +120,11 @@ impl NodeConfig {
         }
         if self.chain.block_reward == 0 {
             return Err(WynError::Config("block_reward deve ser maior que zero".into()));
+        }
+        if !(1..=86_400).contains(&self.chain.min_block_interval_seconds) {
+            return Err(WynError::Config(
+                "chain.min_block_interval_seconds deve estar entre 1 e 86400".into(),
+            ));
         }
         if self.chain.max_transactions_per_block == 0 {
             return Err(WynError::Config(

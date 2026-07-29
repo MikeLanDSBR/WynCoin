@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use clap::Parser;
 use wyncoin_core::blockchain::{Block, Blockchain, ChainParams};
@@ -26,6 +26,7 @@ struct NodeRuntime {
     storage: Storage,
     mining_enabled: bool,
     mine_empty_blocks: bool,
+    min_block_interval_seconds: u64,
     miner_address: String,
     started_at: Instant,
 }
@@ -65,6 +66,7 @@ fn run() -> Result<()> {
         network_id: config.network.id.clone(),
         difficulty: config.chain.difficulty,
         block_reward: config.chain.block_reward,
+        min_block_interval_seconds: config.chain.min_block_interval_seconds,
         max_transactions_per_block: config.chain.max_transactions_per_block,
     };
 
@@ -79,6 +81,7 @@ fn run() -> Result<()> {
         storage,
         mining_enabled: config.mining.enabled,
         mine_empty_blocks: config.mining.mine_empty_blocks,
+        min_block_interval_seconds: config.chain.min_block_interval_seconds,
         miner_address: miner_wallet.address.clone(),
         started_at: Instant::now(),
     }));
@@ -153,6 +156,7 @@ fn mine_one(runtime: &Arc<Mutex<NodeRuntime>>) -> Result<Block> {
         let state = runtime
             .lock()
             .map_err(|_| WynError::Protocol("estado do nó foi envenenado".into()))?;
+        ensure_mining_window(&state)?;
         (
             state.blockchain.build_candidate_block(&state.miner_address)?,
             state.blockchain.last_block().hash.clone(),
@@ -175,6 +179,35 @@ fn mine_one(runtime: &Arc<Mutex<NodeRuntime>>) -> Result<Block> {
     state.storage.append_block(&candidate)?;
     state.blockchain = next;
     Ok(candidate)
+}
+
+fn ensure_mining_window(state: &NodeRuntime) -> Result<()> {
+    let interval_ms = i64::try_from(state.min_block_interval_seconds)
+        .ok()
+        .and_then(|seconds| seconds.checked_mul(1_000))
+        .ok_or_else(|| WynError::Validation("intervalo mínimo de bloco inválido".into()))?;
+    let next_timestamp = state
+        .blockchain
+        .last_block()
+        .header
+        .timestamp
+        .checked_add(interval_ms)
+        .ok_or_else(|| WynError::Validation("timestamp mínimo de bloco excedido".into()))?;
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(|_| WynError::Validation("relógio do sistema anterior ao Unix epoch".into()))?
+        .as_millis();
+    let now = i64::try_from(now)
+        .map_err(|_| WynError::Validation("timestamp atual inválido".into()))?;
+
+    if now < next_timestamp {
+        let remaining_ms = next_timestamp - now;
+        return Err(WynError::Validation(format!(
+            "próximo bloco liberado em {} ms",
+            remaining_ms
+        )));
+    }
+    Ok(())
 }
 
 fn serve(
@@ -259,16 +292,12 @@ fn handle_request_inner(
             submit_transaction(runtime, transaction)
         }
         Request::Mine { blocks } => {
-            if blocks == 0 || blocks > 100 {
+            if blocks != 1 {
                 return Err(WynError::Validation(
-                    "blocks deve estar entre 1 e 100".into(),
+                    "a mineração administrativa confirma exatamente 1 bloco e respeita o intervalo da rede".into(),
                 ));
             }
-            let mut mined = Vec::new();
-            for _ in 0..blocks {
-                mined.push(mine_one(runtime)?);
-            }
-            Ok(ApiResponse::success(mined))
+            Ok(ApiResponse::success(vec![mine_one(runtime)?]))
         }
         Request::Blocks { limit } => with_state(runtime, |state| {
             let limit = limit.clamp(1, 100);

@@ -18,7 +18,7 @@ Rede:
   blocks [limite]
   block <altura>
   mempool
-  mine [quantidade]
+  mine
   balance <endereco>
   utxos <endereco>
 
@@ -86,8 +86,8 @@ case "$command" in
     run_cli block "$1"
     ;;
   mine)
-    if [[ $# -gt 1 ]]; then usage >&2; exit 1; fi
-    run_cli mine "${1:-1}"
+    require_argument_count 0 "$@"
+    run_cli mine 1
     ;;
   balance|utxos)
     require_argument_count 1 "$@"
