@@ -429,6 +429,21 @@ fn handle_p2p_inbound(
             P2pMessage::AnnounceTransaction { transaction } => {
                 let _ = submit_p2p_transaction(&runtime, transaction);
             }
+            // Um nó atrás de NAT pode iniciar a conexão e enviar a própria
+            // chain maior. Isso torna a sincronização realmente bidirecional.
+            P2pMessage::Blocks {
+                blocks,
+                has_more,
+            } => {
+                if has_more {
+                    return Err(WynError::Protocol(
+                        "upload de chain P2P incompleto".into(),
+                    ));
+                }
+                if replace_chain_from_peer(&runtime, blocks)? {
+                    println!("[p2p] chain maior recebida de peer conectado");
+                }
+            }
             P2pMessage::Peers { peers } if peers.is_empty() => {
                 let peers = with_p2p_state(&runtime, |state| state.storage.load_peers(32))?;
                 write_p2p(&mut stream, &P2pMessage::Peers { peers })?;
@@ -481,9 +496,24 @@ fn synchronize_peer(
             state.blockchain.last_block().hash.clone(),
         ))
     })?;
-    if remote.height < local_height
-        || (remote.height == local_height && remote.tip_hash == local_tip)
-    {
+    if remote.height < local_height {
+        let (blocks, mempool) = with_p2p_state(runtime, |state| {
+            Ok((state.blockchain.chain.clone(), state.blockchain.mempool.clone()))
+        })?;
+        write_p2p(
+            &mut stream,
+            &P2pMessage::Blocks {
+                blocks,
+                has_more: false,
+            },
+        )?;
+        for transaction in mempool {
+            write_p2p(&mut stream, &P2pMessage::AnnounceTransaction { transaction })?;
+        }
+        println!("[p2p] chain local maior enviada para {address}");
+        return Ok(true);
+    }
+    if remote.height == local_height && remote.tip_hash == local_tip {
         return Ok(false);
     }
     let mut all_blocks = Vec::new();
@@ -512,25 +542,26 @@ fn synchronize_peer(
             break;
         }
     }
-    let replaced = {
-        let mut state = runtime
-            .lock()
-            .map_err(|_| WynError::Protocol("estado do nó foi envenenado".into()))?;
-        let mut candidate = state.blockchain.clone();
-        if candidate.replace_if_heavier(all_blocks)? {
-            state
-                .storage
-                .replace_chain(&candidate.chain, &candidate.mempool)?;
-            state.blockchain = candidate;
-            true
-        } else {
-            false
-        }
-    };
+    let replaced = replace_chain_from_peer(runtime, all_blocks)?;
     if replaced {
         println!("[p2p] chain sincronizada de {address}");
     }
     Ok(replaced)
+}
+
+fn replace_chain_from_peer(runtime: &Arc<Mutex<NodeRuntime>>, blocks: Vec<Block>) -> Result<bool> {
+    let mut state = runtime
+        .lock()
+        .map_err(|_| WynError::Protocol("estado do nó foi envenenado".into()))?;
+    let mut candidate = state.blockchain.clone();
+    if !candidate.replace_if_heavier(blocks)? {
+        return Ok(false);
+    }
+    state
+        .storage
+        .replace_chain(&candidate.chain, &candidate.mempool)?;
+    state.blockchain = candidate;
+    Ok(true)
 }
 
 fn with_p2p_state<T>(
