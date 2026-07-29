@@ -279,7 +279,10 @@ fn mining_window_wait(state: &NodeRuntime) -> Result<Duration> {
     let now =
         i64::try_from(now).map_err(|_| WynError::Validation("timestamp atual inválido".into()))?;
 
-    let remaining_ms = next_timestamp.saturating_sub(now);
+    if now >= next_timestamp {
+        return Ok(Duration::ZERO);
+    }
+    let remaining_ms = next_timestamp - now;
     Ok(Duration::from_millis(u64::try_from(remaining_ms).map_err(|_| {
         WynError::Validation("tempo de espera da mineração inválido".into())
     })?))
