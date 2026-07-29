@@ -823,7 +823,6 @@ fn api_transactions(
                 .flat_map(|block| &block.transactions)
                 .filter(|transaction| filter.includes(transaction))
                 .count(),
-                .sum(),
         })
     })
 }
