@@ -5,14 +5,16 @@ set -euo pipefail
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DATA_DIR="$PROJECT_ROOT/data"
 SCRIPT_PATH="$PROJECT_ROOT/scripts/$(basename "${BASH_SOURCE[0]}")"
+DEFAULT_WALLET="${WYNCOIN_WALLET:-$HOME/.wyncoin/wallet.json}"
 
 usage() {
   cat <<'EOF'
-Uso: ./scripts/wipe.sh [local|service]
+Uso: ./scripts/wipe.sh [local|wallet|service]
 
 Sem argumentos, abre um menu interativo.
 
   local    remove a blockchain e as carteiras ativas de data/
+  wallet   remove somente a carteira pessoal padrão do usuário atual
   service  remove completamente a instalação systemd da WynCoin
 EOF
 }
@@ -49,9 +51,29 @@ wipe_local() {
   echo "Ambiente local zerado. A próxima execução do nó criará uma nova chain e carteira de minerador."
 }
 
+wipe_wallet() {
+  if [[ ${EUID} -eq 0 ]]; then
+    echo "Não execute o wipe de carteira com sudo; use o usuário proprietário da carteira." >&2
+    exit 1
+  fi
+
+  echo "Será removida somente a carteira pessoal padrão:"
+  echo "  $DEFAULT_WALLET"
+  echo "A blockchain, carteiras do serviço e outras carteiras pessoais serão preservadas."
+
+  if ! confirm "WIPE WALLET"; then
+    echo "Wipe da carteira cancelado."
+    return 0
+  fi
+
+  rm -f -- "$DEFAULT_WALLET"
+  echo "Carteira pessoal padrão removida."
+}
+
 remove_global_command() {
   local command_path="/usr/local/bin/wyncoin"
-  if [[ -L "$command_path" && "$(readlink "$command_path")" == "/opt/wyncoin/bin/wyncoin-cli" ]]; then
+  if [[ -L "$command_path" && "$(readlink "$command_path")" == "/opt/wyncoin/bin/wyncoin-cli" ]] \
+    || [[ -f "$command_path" && "$(grep -Fxc '# WynCoin command launcher: node commands are the default; wallet is explicit.' "$command_path")" == "1" ]]; then
     rm -f -- "$command_path"
   elif [[ -e "$command_path" || -L "$command_path" ]]; then
     echo "Comando global preservado por não apontar para a WynCoin: $command_path" >&2
@@ -95,19 +117,22 @@ fi
 if [[ -z "$mode" ]]; then
   echo "Escolha o wipe desejado:"
   echo "  1) Ambiente local de desenvolvimento"
-  echo "  2) Instalação de serviço"
-  echo "  3) Cancelar"
+  echo "  2) Carteira pessoal padrão"
+  echo "  3) Instalação de serviço"
+  echo "  4) Cancelar"
   read -r -p "Opção: " selection
   case "$selection" in
     1) mode="local" ;;
-    2) mode="service" ;;
-    3) echo "Nenhuma alteração realizada."; exit 0 ;;
+    2) mode="wallet" ;;
+    3) mode="service" ;;
+    4) echo "Nenhuma alteração realizada."; exit 0 ;;
     *) echo "Opção inválida." >&2; exit 1 ;;
   esac
 fi
 
 case "$mode" in
   local) wipe_local ;;
+  wallet) wipe_wallet ;;
   service) wipe_service ;;
   help|-h|--help) usage ;;
   *) usage >&2; exit 1 ;;

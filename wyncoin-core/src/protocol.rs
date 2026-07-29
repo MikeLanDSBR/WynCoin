@@ -18,7 +18,6 @@ pub enum Request {
     Balance { address: String },
     Utxos { address: String },
     SubmitTransaction { transaction: Transaction },
-    Mine { blocks: u32 },
     Blocks { limit: usize },
     Block { height: u64 },
     Mempool,

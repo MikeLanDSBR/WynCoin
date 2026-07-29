@@ -18,7 +18,6 @@ Rede:
   blocks [limite]
   block <altura>
   mempool
-  mine
   balance <endereco>
   utxos <endereco>
 
@@ -84,10 +83,6 @@ case "$command" in
   block)
     require_argument_count 1 "$@"
     run_cli block "$1"
-    ;;
-  mine)
-    require_argument_count 0 "$@"
-    run_cli mine 1
     ;;
   balance|utxos)
     require_argument_count 1 "$@"

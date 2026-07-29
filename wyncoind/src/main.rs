@@ -291,14 +291,6 @@ fn handle_request_inner(
         Request::SubmitTransaction { transaction } => {
             submit_transaction(runtime, transaction)
         }
-        Request::Mine { blocks } => {
-            if blocks != 1 {
-                return Err(WynError::Validation(
-                    "a mineração administrativa confirma exatamente 1 bloco e respeita o intervalo da rede".into(),
-                ));
-            }
-            Ok(ApiResponse::success(vec![mine_one(runtime)?]))
-        }
         Request::Blocks { limit } => with_state(runtime, |state| {
             let limit = limit.clamp(1, 100);
             let start = state.blockchain.chain.len().saturating_sub(limit);

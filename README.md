@@ -71,13 +71,8 @@ cargo run -p wyncoin-cli -- status
 cargo run -p wyncoin-cli -- blocks --limit 5
 ```
 
-A configuração padrão minera um bloco por ciclo de 60 segundos. Para testar
-imediatamente:
-
-```bash
-cargo run -p wyncoin-cli -- mine 1
-cargo run -p wyncoin-cli -- status
-```
+A configuração padrão minera automaticamente um bloco por ciclo de 60
+segundos. A mineração não é exposta pela CLI administrativa.
 
 ## Criar uma carteira
 
@@ -104,11 +99,12 @@ cargo run -p wyncoin-wallet -- send \
   --fee 0.001
 ```
 
-A transação entra no mempool. Confirme-a minerando:
+A transação entra no mempool e será confirmada automaticamente no próximo
+ciclo de mineração, em até aproximadamente 60 segundos:
 
 ```bash
 cargo run -p wyncoin-cli -- mempool
-cargo run -p wyncoin-cli -- mine 1
+# aguarde o próximo bloco automático
 cargo run -p wyncoin-wallet -- balance --file data/wallets/alice.json
 ```
 
@@ -147,7 +143,28 @@ Comandos instalados:
 /opt/wyncoin/bin/wyncoin-wallet balance --address WYN...
 wyncoin status
 wyncoin blocks --limit 5
+wyncoin wallet create
+wyncoin wallet info
+wyncoin wallet balance
 ```
+
+Uma carteira pessoal é um arquivo JSON que contém a chave privada; ela não é
+criada automaticamente pela instalação. Para criar e usar uma carteira:
+
+```bash
+wyncoin wallet create
+wyncoin wallet info
+wyncoin wallet balance
+wyncoin wallet send \
+  --to WYN_ENDERECO_DESTINO \
+  --amount 10 \
+  --fee 0.001
+```
+
+A carteira recém-criada começa com saldo zero. Nesta versão, sem P2P, cada
+instalação opera a própria chain local; transferências só alcançam o nó local.
+Por padrão a carteira fica em `~/.wyncoin/wallet.json`; defina
+`WYNCOIN_WALLET=/outro/caminho.json` para usar outra carteira.
 
 ## Atualizar ou zerar
 
@@ -165,9 +182,10 @@ Para zerar ambientes, use o menu interativo:
 ```
 
 `local` remove somente a chain e as carteiras ativas em `data/`, preservando
-`data/node.toml` e backups em `data/archive/`. `service` exige `sudo` e remove
-os serviços, binários, configuração e dados de produção em `/var/lib/wyncoin`.
-As duas operações exigem confirmação textual explícita.
+`data/node.toml` e backups em `data/archive/`. `wallet` remove somente a
+carteira pessoal padrão em `~/.wyncoin/wallet.json`. `service` exige `sudo` e
+remove os serviços, binários, configuração e dados de produção em
+`/var/lib/wyncoin`. Todas as operações exigem confirmação textual explícita.
 
 A API permanece apenas em `127.0.0.1:9332`. Não altere para `0.0.0.0` nesta
 versão: o protocolo ainda não possui autenticação nem TLS.

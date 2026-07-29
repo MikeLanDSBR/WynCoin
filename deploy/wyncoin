@@ -1,0 +1,89 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# WynCoin command launcher: node commands are the default; wallet is explicit.
+BIN_DIR="/opt/wyncoin/bin"
+DEFAULT_WALLET="${WYNCOIN_WALLET:-$HOME/.wyncoin/wallet.json}"
+
+wallet_usage() {
+  cat <<EOF
+Uso: wyncoin wallet <comando>
+
+Carteira padrão: $DEFAULT_WALLET
+
+  create                 cria a carteira padrão
+  info                   mostra o endereço da carteira padrão
+  balance                consulta o saldo da carteira padrão
+  send --to <endereço> --amount <WYN> [--fee <WYN>]
+
+Use WYNCOIN_WALLET=/outro/caminho.json para trocar a carteira padrão.
+EOF
+}
+
+require_default_wallet() {
+  if [[ ! -f "$DEFAULT_WALLET" ]]; then
+    echo "Carteira padrão não encontrada: $DEFAULT_WALLET" >&2
+    echo "Crie uma com: wyncoin wallet create" >&2
+    exit 1
+  fi
+}
+
+has_wallet_file_argument() {
+  local argument
+  for argument in "$@"; do
+    if [[ "$argument" == "--file" || "$argument" == "-f" ]]; then
+      return 0
+    fi
+  done
+  return 1
+}
+
+if [[ "${1:-}" == "wallet" ]]; then
+  shift
+  wallet_command="${1:-}"
+  if [[ $# -gt 0 ]]; then
+    shift
+  fi
+
+  umask 077
+  case "$wallet_command" in
+    ""|help|-h|--help)
+      wallet_usage
+      exit 0
+      ;;
+    create|new)
+      if [[ $# -eq 0 ]]; then
+        exec "$BIN_DIR/wyncoin-wallet" new --output "$DEFAULT_WALLET"
+      fi
+      exec "$BIN_DIR/wyncoin-wallet" new "$@"
+      ;;
+    info)
+      if [[ $# -eq 0 ]]; then
+        require_default_wallet
+        exec "$BIN_DIR/wyncoin-wallet" info --file "$DEFAULT_WALLET"
+      fi
+      exec "$BIN_DIR/wyncoin-wallet" info "$@"
+      ;;
+    balance)
+      if [[ $# -eq 0 ]]; then
+        require_default_wallet
+        exec "$BIN_DIR/wyncoin-wallet" balance --file "$DEFAULT_WALLET"
+      fi
+      exec "$BIN_DIR/wyncoin-wallet" balance "$@"
+      ;;
+    send)
+      if has_wallet_file_argument "$@"; then
+        exec "$BIN_DIR/wyncoin-wallet" send "$@"
+      fi
+      require_default_wallet
+      exec "$BIN_DIR/wyncoin-wallet" send --file "$DEFAULT_WALLET" "$@"
+      ;;
+    *)
+      echo "Comando de carteira desconhecido: $wallet_command" >&2
+      wallet_usage >&2
+      exit 1
+      ;;
+  esac
+fi
+
+exec "$BIN_DIR/wyncoin-cli" "$@"

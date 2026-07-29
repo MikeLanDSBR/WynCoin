@@ -18,10 +18,6 @@ enum Command {
     Status,
     Balance { address: String },
     Utxos { address: String },
-    Mine {
-        #[arg(default_value_t = 1)]
-        blocks: u32,
-    },
     Blocks {
         #[arg(short, long, default_value_t = 10)]
         limit: usize,
@@ -69,19 +65,6 @@ fn run() -> Result<()> {
             let response = send_request(&args.node, &Request::Utxos { address })?;
             let utxos: Vec<Utxo> = response.require_data()?;
             println!("{}", serde_json::to_string_pretty(&utxos)?);
-        }
-        Command::Mine { blocks } => {
-            let response = send_request(&args.node, &Request::Mine { blocks })?;
-            let mined: Vec<Block> = response.require_data()?;
-            for block in mined {
-                println!(
-                    "bloco #{} {} nonce={} txs={}",
-                    block.index,
-                    block.hash,
-                    block.header.nonce,
-                    block.transactions.len()
-                );
-            }
         }
         Command::Blocks { limit } => {
             let response = send_request(&args.node, &Request::Blocks { limit })?;
