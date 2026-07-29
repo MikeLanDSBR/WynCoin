@@ -1,0 +1,25 @@
+[Unit]
+Description=WynCoin blockchain node
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=wyncoin
+Group=wyncoin
+WorkingDirectory=/opt/wyncoin
+ExecStart=/opt/wyncoin/bin/wyncoind --config /etc/wyncoin/node.toml
+Restart=on-failure
+RestartSec=5
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/var/lib/wyncoin
+LockPersonality=true
+MemoryDenyWriteExecute=true
+RestrictSUIDSGID=true
+
+[Install]
+WantedBy=multi-user.target

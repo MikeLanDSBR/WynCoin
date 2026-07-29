@@ -1,0 +1,9 @@
+/target
+**/target
+*.db
+*.db-shm
+*.db-wal
+*.pem
+/data/wallets/*.json
+!/data/wallets/.gitkeep
+.env

@@ -1,0 +1,20 @@
+[network]
+id = "wyncoin-local-v1"
+listen = "127.0.0.1:9332"
+
+[chain]
+# A v0.1.0 usa dificuldade fixa por quantidade de zeros hexadecimais.
+difficulty = 4
+# 50 WYN em unidades mínimas (1 WYN = 100_000_000 unidades).
+block_reward = 5000000000
+max_transactions_per_block = 100
+
+[mining]
+enabled = true
+mine_empty_blocks = true
+# Um novo trabalho de mineração é iniciado neste intervalo.
+interval_seconds = 60
+miner_wallet = "wallets/miner.json"
+
+[storage]
+database = "blockchain.db"

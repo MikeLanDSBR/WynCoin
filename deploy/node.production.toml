@@ -1,0 +1,17 @@
+[network]
+id = "wyncoin-private-v1"
+listen = "127.0.0.1:9332"
+
+[chain]
+difficulty = 4
+block_reward = 5000000000
+max_transactions_per_block = 100
+
+[mining]
+enabled = true
+mine_empty_blocks = true
+interval_seconds = 60
+miner_wallet = "/var/lib/wyncoin/wallets/miner.json"
+
+[storage]
+database = "/var/lib/wyncoin/blockchain.db"

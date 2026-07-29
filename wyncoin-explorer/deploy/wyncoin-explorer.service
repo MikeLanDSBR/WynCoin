@@ -1,0 +1,27 @@
+[Unit]
+Description=WynCoin Blockchain Explorer
+After=network-online.target wyncoind.service
+Wants=network-online.target
+Requires=wyncoind.service
+
+[Service]
+Type=simple
+User=wyncoin
+Group=wyncoin
+WorkingDirectory=/opt/wyncoin
+ExecStart=/opt/wyncoin/bin/wyncoin-explorer \
+    --listen 127.0.0.1:8080 \
+    --node 127.0.0.1:9332 \
+    --database /var/lib/wyncoin/blockchain.db \
+    --no-open
+Restart=on-failure
+RestartSec=5
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadOnlyPaths=/var/lib/wyncoin
+
+[Install]
+WantedBy=multi-user.target
