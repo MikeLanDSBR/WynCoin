@@ -1,6 +1,6 @@
 # Testnet pública experimental. A API administrativa fica local; somente P2P é público.
 [network]
-id = "wyncoin-public-testnet-v3"
+id = "wyncoin-public-testnet-v4"
 listen = "127.0.0.1:9332"
 
 [p2p]
@@ -10,12 +10,19 @@ seeds = ["191.252.204.223:9333"]
 max_peers = 32
 
 [chain]
+consensus_version = 4
 initial_target = 1099511627775
 block_reward = 5000000000
 target_block_time_seconds = 60
 retarget_interval_blocks = 20
 max_retarget_factor = 4
-max_transactions_per_block = 100
+max_transactions_per_block = 1000
+max_block_size_bytes = 2097152
+coinbase_maturity_blocks = 20
+max_future_block_time_seconds = 30
+upgrade_vote_window_blocks = 200
+upgrade_vote_threshold_percent = 90
+upgrade_activation_delay_blocks = 100
 
 [mining]
 enabled = false

@@ -146,7 +146,11 @@ impl Transaction {
 
 impl std::fmt::Display for Transaction {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let kind = if self.is_coinbase { "coinbase" } else { "regular" };
+        let kind = if self.is_coinbase {
+            "coinbase"
+        } else {
+            "regular"
+        };
         write!(
             formatter,
             "TX {} ({kind}, {} input(s), {} output(s))",

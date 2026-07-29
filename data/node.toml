@@ -3,13 +3,20 @@ id = "wyncoin-local-v2"
 listen = "127.0.0.1:9332"
 
 [chain]
+consensus_version = 4
 initial_target = 72057594037927935
 # 50 WYN em unidades mínimas (1 WYN = 100_000_000 unidades).
 block_reward = 5000000000
 target_block_time_seconds = 60
 retarget_interval_blocks = 20
 max_retarget_factor = 4
-max_transactions_per_block = 100
+max_transactions_per_block = 1000
+max_block_size_bytes = 2097152
+coinbase_maturity_blocks = 20
+max_future_block_time_seconds = 30
+upgrade_vote_window_blocks = 200
+upgrade_vote_threshold_percent = 90
+upgrade_activation_delay_blocks = 100
 
 [mining]
 enabled = true

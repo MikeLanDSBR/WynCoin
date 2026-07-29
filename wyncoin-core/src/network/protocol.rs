@@ -9,7 +9,10 @@ use crate::blockchain::{Block, Transaction};
 use crate::{Result, WynError};
 
 pub const MAX_REQUEST_BYTES: usize = 1_048_576;
-pub const MAX_P2P_MESSAGE_BYTES: usize = 2_097_152;
+/// O bloco consensual pode ter até 2 MiB. A mensagem P2P inclui um pequeno
+/// envelope JSON além do bloco, então a camada de transporte reserva 64 KiB
+/// extras sem aumentar o limite válido de bloco.
+pub const MAX_P2P_MESSAGE_BYTES: usize = 2_097_152 + 65_536;
 pub const P2P_PROTOCOL_VERSION: u32 = 1;
 
 /// Mensagens exclusivas da porta P2P. A API local nunca é exposta nesta porta.

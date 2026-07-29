@@ -112,6 +112,10 @@ struct ChainStats {
     coinbase_transactions: usize,
     issued_supply_atomic: String,
     issued_supply_wyn: String,
+    fees_distributed_atomic: String,
+    fees_distributed_wyn: String,
+    total_coinbase_payout_atomic: String,
+    total_coinbase_payout_wyn: String,
     total_output_atomic: String,
     total_output_wyn: String,
     mempool_total_atomic: String,
@@ -561,7 +565,6 @@ impl ExplorerState {
     }
 }
 
-
 fn open_database_read_only(path: &std::path::Path) -> Result<Connection> {
     let connection = Connection::open_with_flags(
         path,
@@ -584,9 +587,8 @@ fn load_blocks_read_only(path: &std::path::Path) -> Result<Vec<Block>> {
 
 fn load_mempool_read_only(path: &std::path::Path) -> Result<Vec<Transaction>> {
     let connection = open_database_read_only(path)?;
-    let mut statement = connection.prepare(
-        "SELECT data FROM mempool ORDER BY received_at ASC, txid ASC",
-    )?;
+    let mut statement =
+        connection.prepare("SELECT data FROM mempool ORDER BY received_at ASC, txid ASC")?;
     let rows = statement.query_map([], |row| row.get::<_, String>(0))?;
     let mut transactions = Vec::new();
     for row in rows {
@@ -656,7 +658,7 @@ fn api_status(
             .flat_map(|transaction| &transaction.outputs)
             .try_fold(0u64, |total, output| total.checked_add(output.amount))
             .ok_or_else(|| WynError::Validation("overflow nas estatísticas da chain".into()))?;
-        let issued_supply = snapshot
+        let total_coinbase_payout = snapshot
             .blocks
             .iter()
             .flat_map(|block| &block.transactions)
@@ -664,6 +666,16 @@ fn api_status(
             .flat_map(|transaction| &transaction.outputs)
             .try_fold(0u64, |total, output| total.checked_add(output.amount))
             .ok_or_else(|| WynError::Validation("overflow na oferta emitida".into()))?;
+        // A emissão é apenas a subsídio fixo. O restante pago em coinbase vem
+        // de taxas que já foram retiradas dos inputs das transações regulares.
+        let issued_supply = (coinbase_transactions as u64)
+            .checked_mul(snapshot.status.block_reward)
+            .ok_or_else(|| WynError::Validation("overflow na oferta emitida".into()))?;
+        let fees_distributed = total_coinbase_payout
+            .checked_sub(issued_supply)
+            .ok_or_else(|| {
+                WynError::Validation("coinbase menor que a emissão base esperada".into())
+            })?;
         let mempool_total = snapshot
             .mempool
             .iter()
@@ -689,7 +701,10 @@ fn api_status(
             .zip(recent_blocks.last())
             .and_then(|(newest, oldest)| {
                 let intervals = recent_blocks.len().checked_sub(1)? as i64;
-                let elapsed = newest.header.timestamp.checked_sub(oldest.header.timestamp)?;
+                let elapsed = newest
+                    .header
+                    .timestamp
+                    .checked_sub(oldest.header.timestamp)?;
                 // O cabeçalho guarda milissegundos desde Unix epoch; a API
                 // expõe o ritmo em segundos para a interface.
                 (intervals > 0 && elapsed >= 0).then(|| (elapsed / intervals / 1_000) as u64)
@@ -706,6 +721,10 @@ fn api_status(
                 coinbase_transactions,
                 issued_supply_atomic: issued_supply.to_string(),
                 issued_supply_wyn: format_wyn(issued_supply),
+                fees_distributed_atomic: fees_distributed.to_string(),
+                fees_distributed_wyn: format_wyn(fees_distributed),
+                total_coinbase_payout_atomic: total_coinbase_payout.to_string(),
+                total_coinbase_payout_wyn: format_wyn(total_coinbase_payout),
                 total_output_atomic: total_output.to_string(),
                 total_output_wyn: format_wyn(total_output),
                 mempool_total_atomic: mempool_total.to_string(),
@@ -798,10 +817,24 @@ fn api_transactions(
             .unwrap_or(snapshot.status.height);
         let filter = TransactionFilter::from_query(query.get("type"))?;
         let mut items = Vec::with_capacity(limit);
-        for block in snapshot.blocks.iter().rev().filter(|block| block.index <= before_height) {
-            for transaction in block.transactions.iter().rev().filter(|transaction| filter.includes(transaction)) {
+        for block in snapshot
+            .blocks
+            .iter()
+            .rev()
+            .filter(|block| block.index <= before_height)
+        {
+            for transaction in block
+                .transactions
+                .iter()
+                .rev()
+                .filter(|transaction| filter.includes(transaction))
+            {
                 items.push(TransactionLocation {
-                    transaction: transaction_view(transaction, Some(block.index), snapshot.status.height)?,
+                    transaction: transaction_view(
+                        transaction,
+                        Some(block.index),
+                        snapshot.status.height,
+                    )?,
                     block: Some(block_summary(block)?),
                     in_mempool: false,
                 });
@@ -863,11 +896,7 @@ fn api_address(
     })
 }
 
-fn api_mempool(
-    state: &ExplorerState,
-    stream: &mut TcpStream,
-    head_only: bool,
-) -> Result<()> {
+fn api_mempool(state: &ExplorerState, stream: &mut TcpStream, head_only: bool) -> Result<()> {
     respond_with(stream, head_only, || {
         let snapshot = state.snapshot()?;
         snapshot
@@ -1061,7 +1090,8 @@ fn find_transaction(snapshot: &Snapshot, transaction_id: &str) -> Option<Transac
             .iter()
             .find(|transaction| transaction.id == transaction_id)
         {
-            let view = transaction_view(transaction, Some(block.index), snapshot.status.height).ok()?;
+            let view =
+                transaction_view(transaction, Some(block.index), snapshot.status.height).ok()?;
             return Some(TransactionLocation {
                 transaction: view,
                 block: block_summary(block).ok(),
@@ -1072,7 +1102,11 @@ fn find_transaction(snapshot: &Snapshot, transaction_id: &str) -> Option<Transac
     None
 }
 
-fn build_address_view(snapshot: &Snapshot, address: &str, activity_limit: usize) -> Result<AddressView> {
+fn build_address_view(
+    snapshot: &Snapshot,
+    address: &str,
+    activity_limit: usize,
+) -> Result<AddressView> {
     let mut output_index: HashMap<(String, usize), (String, u64)> = HashMap::new();
     let mut outputs: HashMap<(String, usize), UtxoView> = HashMap::new();
     let mut spent_outputs = HashSet::new();
@@ -1115,7 +1149,11 @@ fn build_address_view(snapshot: &Snapshot, address: &str, activity_limit: usize)
                             transaction_id: transaction.id.clone(),
                             output_index: index,
                             block_height: block.index,
-                            confirmations: snapshot.status.height.saturating_sub(block.index).saturating_add(1),
+                            confirmations: snapshot
+                                .status
+                                .height
+                                .saturating_sub(block.index)
+                                .saturating_add(1),
                             timestamp: transaction.timestamp,
                             amount_atomic: output.amount.to_string(),
                             amount_wyn: format_wyn(output.amount),
@@ -1125,12 +1163,12 @@ fn build_address_view(snapshot: &Snapshot, address: &str, activity_limit: usize)
             }
 
             if incoming > 0 || outgoing > 0 {
-                received = received.checked_add(incoming).ok_or_else(|| {
-                    WynError::Validation("overflow no total recebido".into())
-                })?;
-                sent = sent.checked_add(outgoing).ok_or_else(|| {
-                    WynError::Validation("overflow no total enviado".into())
-                })?;
+                received = received
+                    .checked_add(incoming)
+                    .ok_or_else(|| WynError::Validation("overflow no total recebido".into()))?;
+                sent = sent
+                    .checked_add(outgoing)
+                    .ok_or_else(|| WynError::Validation("overflow no total enviado".into()))?;
                 activities.push(address_activity(
                     transaction,
                     Some(block.index),
@@ -1146,7 +1184,9 @@ fn build_address_view(snapshot: &Snapshot, address: &str, activity_limit: usize)
         let mut incoming = 0u64;
         let mut outgoing = 0u64;
         for input in &transaction.inputs {
-            if let Some((owner, amount)) = output_index.get(&(input.tx_id.clone(), input.output_index)) {
+            if let Some((owner, amount)) =
+                output_index.get(&(input.tx_id.clone(), input.output_index))
+            {
                 if owner == address {
                     outgoing = outgoing.checked_add(*amount).ok_or_else(|| {
                         WynError::Validation("overflow no histórico do mempool".into())

@@ -6,12 +6,15 @@ use crate::{Result, WynError};
 
 use super::Transaction;
 
-pub const ZERO_HASH: &str =
-    "0000000000000000000000000000000000000000000000000000000000000000";
+pub const ZERO_HASH: &str = "0000000000000000000000000000000000000000000000000000000000000000";
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct BlockHeader {
+    /// Versão das regras de consenso que produziram este bloco.
     pub version: u32,
+    /// Bits reservados para sinalização de upgrades futuros. Eles não alteram
+    /// regras sozinhos; uma proposta futura precisa atribuir semântica a um bit.
+    pub upgrade_signals: u32,
     pub network_id: String,
     pub prev_hash: String,
     pub merkle_root: String,
@@ -35,7 +38,8 @@ impl Block {
         let mut block = Self {
             index: 0,
             header: BlockHeader {
-                version: 1,
+                version: 4,
+                upgrade_signals: 0,
                 network_id: network_id.to_string(),
                 prev_hash: ZERO_HASH.to_string(),
                 merkle_root: ZERO_HASH.to_string(),
@@ -52,6 +56,8 @@ impl Block {
 
     pub fn new(
         network_id: &str,
+        consensus_version: u32,
+        upgrade_signals: u32,
         index: u64,
         prev_hash: String,
         transactions: Vec<Transaction>,
@@ -61,7 +67,8 @@ impl Block {
         let mut block = Self {
             index,
             header: BlockHeader {
-                version: 1,
+                version: consensus_version,
+                upgrade_signals,
                 network_id: network_id.to_string(),
                 prev_hash,
                 merkle_root,
@@ -80,6 +87,7 @@ impl Block {
         let encoded = serde_json::to_vec(&(
             self.index,
             &self.header.version,
+            &self.header.upgrade_signals,
             &self.header.network_id,
             &self.header.prev_hash,
             &self.header.merkle_root,

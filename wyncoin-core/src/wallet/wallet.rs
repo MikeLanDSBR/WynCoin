@@ -31,11 +31,15 @@ impl Wallet {
 
         let private_key_pem = private_key
             .to_pkcs8_pem(rsa::pkcs8::LineEnding::LF)
-            .map_err(|error| WynError::Crypto(format!("falha ao codificar chave privada: {error}")))?
+            .map_err(|error| {
+                WynError::Crypto(format!("falha ao codificar chave privada: {error}"))
+            })?
             .to_string();
         let public_key_pem = public_key
             .to_public_key_pem(rsa::pkcs8::LineEnding::LF)
-            .map_err(|error| WynError::Crypto(format!("falha ao codificar chave pública: {error}")))?;
+            .map_err(|error| {
+                WynError::Crypto(format!("falha ao codificar chave pública: {error}"))
+            })?;
         let address = Self::address_from_public_pem(&public_key_pem);
 
         Ok(Self {
@@ -143,7 +147,9 @@ impl Wallet {
             ));
         }
         if amount == 0 {
-            return Err(WynError::Validation("o valor deve ser maior que zero".into()));
+            return Err(WynError::Validation(
+                "o valor deve ser maior que zero".into(),
+            ));
         }
 
         let required = amount

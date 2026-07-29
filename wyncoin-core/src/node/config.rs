@@ -57,6 +57,7 @@ impl Default for P2pConfig {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ChainConfig {
+    pub consensus_version: u32,
     /// Alvo PoW inicial sobre os primeiros 64 bits do hash. Menor é mais difícil.
     pub initial_target: u64,
     pub block_reward: u64,
@@ -64,6 +65,12 @@ pub struct ChainConfig {
     pub retarget_interval_blocks: u64,
     pub max_retarget_factor: u64,
     pub max_transactions_per_block: usize,
+    pub max_block_size_bytes: usize,
+    pub coinbase_maturity_blocks: u64,
+    pub max_future_block_time_seconds: u64,
+    pub upgrade_vote_window_blocks: u64,
+    pub upgrade_vote_threshold_percent: u8,
+    pub upgrade_activation_delay_blocks: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -93,12 +100,19 @@ impl Default for NodeConfig {
             },
             p2p: P2pConfig::default(),
             chain: ChainConfig {
+                consensus_version: 4,
                 initial_target: 1_099_511_627_775,
                 block_reward: 5_000_000_000,
                 target_block_time_seconds: 60,
                 retarget_interval_blocks: 20,
                 max_retarget_factor: 4,
                 max_transactions_per_block: 100,
+                max_block_size_bytes: 2 * 1024 * 1024,
+                coinbase_maturity_blocks: 20,
+                max_future_block_time_seconds: 30,
+                upgrade_vote_window_blocks: 200,
+                upgrade_vote_threshold_percent: 90,
+                upgrade_activation_delay_blocks: 100,
             },
             mining: MiningConfig {
                 enabled: true,
@@ -187,6 +201,11 @@ impl NodeConfig {
                 "chain.initial_target deve ser maior que zero".into(),
             ));
         }
+        if self.chain.consensus_version != 4 {
+            return Err(WynError::Config(
+                "esta versão do nó exige chain.consensus_version = 4".into(),
+            ));
+        }
         if self.chain.block_reward == 0 {
             return Err(WynError::Config(
                 "block_reward deve ser maior que zero".into(),
@@ -210,6 +229,31 @@ impl NodeConfig {
         if self.chain.max_transactions_per_block == 0 {
             return Err(WynError::Config(
                 "max_transactions_per_block deve ser maior que zero".into(),
+            ));
+        }
+        if !(1_024..=16 * 1024 * 1024).contains(&self.chain.max_block_size_bytes) {
+            return Err(WynError::Config(
+                "chain.max_block_size_bytes deve estar entre 1024 e 16777216".into(),
+            ));
+        }
+        if self.chain.coinbase_maturity_blocks == 0 {
+            return Err(WynError::Config(
+                "chain.coinbase_maturity_blocks deve ser maior que zero".into(),
+            ));
+        }
+        if !(1..=600).contains(&self.chain.max_future_block_time_seconds) {
+            return Err(WynError::Config(
+                "chain.max_future_block_time_seconds deve estar entre 1 e 600".into(),
+            ));
+        }
+        if !(10..=10_000).contains(&self.chain.upgrade_vote_window_blocks) {
+            return Err(WynError::Config(
+                "chain.upgrade_vote_window_blocks deve estar entre 10 e 10000".into(),
+            ));
+        }
+        if !(51..=100).contains(&self.chain.upgrade_vote_threshold_percent) {
+            return Err(WynError::Config(
+                "chain.upgrade_vote_threshold_percent deve estar entre 51 e 100".into(),
             ));
         }
         if self.mining.enabled

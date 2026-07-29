@@ -1,6 +1,5 @@
 use thiserror::Error;
 
-
 #[derive(Debug, Error)]
 pub enum WynError {
     #[error("erro de E/S: {0}")]

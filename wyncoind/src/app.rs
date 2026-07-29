@@ -79,12 +79,19 @@ fn run() -> Result<()> {
 
     let params = ChainParams {
         network_id: config.network.id.clone(),
+        consensus_version: config.chain.consensus_version,
         initial_target: config.chain.initial_target,
         block_reward: config.chain.block_reward,
         target_block_time_seconds: config.chain.target_block_time_seconds,
         retarget_interval_blocks: config.chain.retarget_interval_blocks,
         max_retarget_factor: config.chain.max_retarget_factor,
         max_transactions_per_block: config.chain.max_transactions_per_block,
+        max_block_size_bytes: config.chain.max_block_size_bytes,
+        coinbase_maturity_blocks: config.chain.coinbase_maturity_blocks,
+        max_future_block_time_seconds: config.chain.max_future_block_time_seconds,
+        upgrade_vote_window_blocks: config.chain.upgrade_vote_window_blocks,
+        upgrade_vote_threshold_percent: config.chain.upgrade_vote_threshold_percent,
+        upgrade_activation_delay_blocks: config.chain.upgrade_activation_delay_blocks,
     };
 
     let fresh_chain = Blockchain::new(params.clone());
@@ -178,14 +185,20 @@ fn spawn_miner(
                         block.index,
                         block.hash.get(..20).unwrap_or(&block.hash)
                     ),
-                    Err(WynError::Validation(message)) if message == "o topo da chain mudou durante a mineração" => {
+                    Err(WynError::Validation(message))
+                        if message == "o topo da chain mudou durante a mineração" =>
+                    {
                         println!("[miner] trabalho abandonado: novo bloco recebido da rede");
                     }
                     Err(error) => eprintln!("[miner] bloco descartado: {error}"),
                 }
             }
 
-            let wait = if should_mine { Duration::from_millis(50) } else { Duration::from_secs(interval_seconds.max(1)) };
+            let wait = if should_mine {
+                Duration::from_millis(50)
+            } else {
+                Duration::from_secs(interval_seconds.max(1))
+            };
             let start = Instant::now();
             while start.elapsed() < wait && !stop.load(Ordering::SeqCst) {
                 thread::sleep(Duration::from_millis(200));
@@ -231,7 +244,6 @@ fn mine_one(runtime: &Arc<Mutex<NodeRuntime>>) -> Result<Block> {
     );
     Ok(candidate)
 }
-
 
 fn spawn_p2p(
     runtime: Arc<Mutex<NodeRuntime>>,
@@ -434,9 +446,8 @@ fn handle_p2p_inbound(
                 }
             }
             P2pMessage::GetMempool => {
-                let transactions = with_p2p_state(&runtime, |state| {
-                    Ok(state.blockchain.mempool.clone())
-                })?;
+                let transactions =
+                    with_p2p_state(&runtime, |state| Ok(state.blockchain.mempool.clone()))?;
                 write_p2p(&mut stream, &P2pMessage::Mempool { transactions })?;
             }
             P2pMessage::Mempool { transactions } => {
@@ -448,14 +459,9 @@ fn handle_p2p_inbound(
             }
             // Um nó atrás de NAT pode iniciar a conexão e enviar a própria
             // chain maior. Isso torna a sincronização realmente bidirecional.
-            P2pMessage::Blocks {
-                blocks,
-                has_more,
-            } => {
+            P2pMessage::Blocks { blocks, has_more } => {
                 if has_more {
-                    return Err(WynError::Protocol(
-                        "upload de chain P2P incompleto".into(),
-                    ));
+                    return Err(WynError::Protocol("upload de chain P2P incompleto".into()));
                 }
                 if replace_chain_from_peer(&runtime, blocks)? {
                     println!("[p2p] chain maior recebida de peer conectado");
@@ -515,7 +521,10 @@ fn synchronize_peer(
     })?;
     if remote.height < local_height {
         let (blocks, mempool) = with_p2p_state(runtime, |state| {
-            Ok((state.blockchain.chain.clone(), state.blockchain.mempool.clone()))
+            Ok((
+                state.blockchain.chain.clone(),
+                state.blockchain.mempool.clone(),
+            ))
         })?;
         write_p2p(
             &mut stream,
@@ -525,7 +534,10 @@ fn synchronize_peer(
             },
         )?;
         for transaction in mempool {
-            write_p2p(&mut stream, &P2pMessage::AnnounceTransaction { transaction })?;
+            write_p2p(
+                &mut stream,
+                &P2pMessage::AnnounceTransaction { transaction },
+            )?;
         }
         println!("[p2p] chain local maior enviada para {address}");
         return Ok(true);
@@ -790,7 +802,10 @@ fn handle_request_inner(
                 .lock()
                 .map_err(|_| WynError::Protocol("estado do nó foi envenenado".into()))?;
             state.mining_enabled = enabled;
-            println!("[miner] mineração {} pela API local", if enabled { "ativada" } else { "desativada" });
+            println!(
+                "[miner] mineração {} pela API local",
+                if enabled { "ativada" } else { "desativada" }
+            );
             Ok(ApiResponse::success(state.mining_enabled))
         }
     }
