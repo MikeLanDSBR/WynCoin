@@ -25,6 +25,11 @@ enum Command {
         #[arg(short, long)]
         file: PathBuf,
     },
+    /// Imprime apenas o endereço; destinado a scripts de instalação.
+    Address {
+        #[arg(short, long)]
+        file: PathBuf,
+    },
     Balance {
         #[arg(short, long)]
         file: Option<PathBuf>,
@@ -71,6 +76,9 @@ fn run() -> Result<()> {
             println!("Endereço: {}", wallet.address);
             println!("Arquivo : {}", file.display());
         }
+        Command::Address { file } => {
+            println!("{}", Wallet::load_from_file(&file)?.address);
+        }
         Command::Balance { file, address } => {
             let address = match (file, address) {
                 (Some(file), None) => Wallet::load_from_file(file)?.address,
@@ -81,7 +89,12 @@ fn run() -> Result<()> {
                     ))
                 }
             };
-            let response = send_request(&args.node, &Request::Balance { address: address.clone() })?;
+            let response = send_request(
+                &args.node,
+                &Request::Balance {
+                    address: address.clone(),
+                },
+            )?;
             let balance: u64 = response.require_data()?;
             println!("{}: {} WYN", address, format_wyn(balance));
         }
@@ -105,10 +118,7 @@ fn run() -> Result<()> {
             let transaction = wallet.build_transaction(&utxos, &to, amount, fee)?;
             let txid = transaction.id.clone();
 
-            let response = send_request(
-                &args.node,
-                &Request::SubmitTransaction { transaction },
-            )?;
+            let response = send_request(&args.node, &Request::SubmitTransaction { transaction })?;
             let result: Value = response.require_data()?;
             println!("Transação aceita no mempool.");
             println!("TXID : {txid}");

@@ -9,6 +9,8 @@ use crate::{Result, WynError};
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NodeConfig {
     pub network: NetworkConfig,
+    #[serde(default)]
+    pub p2p: P2pConfig,
     pub chain: ChainConfig,
     pub mining: MiningConfig,
     pub storage: StorageConfig,
@@ -18,6 +20,39 @@ pub struct NodeConfig {
 pub struct NetworkConfig {
     pub id: String,
     pub listen: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct P2pConfig {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default = "default_p2p_listen")]
+    pub listen: String,
+    #[serde(default)]
+    pub advertise: Option<String>,
+    #[serde(default)]
+    pub seeds: Vec<String>,
+    #[serde(default = "default_max_peers")]
+    pub max_peers: usize,
+}
+
+fn default_p2p_listen() -> String {
+    "127.0.0.1:9333".into()
+}
+fn default_max_peers() -> usize {
+    32
+}
+
+impl Default for P2pConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            listen: default_p2p_listen(),
+            advertise: None,
+            seeds: Vec::new(),
+            max_peers: default_max_peers(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -33,7 +68,12 @@ pub struct MiningConfig {
     pub enabled: bool,
     pub mine_empty_blocks: bool,
     pub interval_seconds: u64,
-    pub miner_wallet: PathBuf,
+    /// Endereço público que recebe a coinbase. Não exige que o daemon guarde a chave.
+    #[serde(default)]
+    pub miner_address: Option<String>,
+    /// Compatibilidade exclusiva com instalações privadas anteriores a P2P.
+    #[serde(default)]
+    pub miner_wallet: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -48,6 +88,7 @@ impl Default for NodeConfig {
                 id: "wyncoin-local-v1".into(),
                 listen: "127.0.0.1:9332".into(),
             },
+            p2p: P2pConfig::default(),
             chain: ChainConfig {
                 difficulty: 4,
                 block_reward: 5_000_000_000,
@@ -58,7 +99,8 @@ impl Default for NodeConfig {
                 enabled: true,
                 mine_empty_blocks: true,
                 interval_seconds: 60,
-                miner_wallet: PathBuf::from("wallets/miner.json"),
+                miner_address: None,
+                miner_wallet: Some(PathBuf::from("wallets/miner.json")),
             },
             storage: StorageConfig {
                 database: PathBuf::from("blockchain.db"),
@@ -93,8 +135,10 @@ impl NodeConfig {
         if self.storage.database.is_relative() {
             self.storage.database = base.join(&self.storage.database);
         }
-        if self.mining.miner_wallet.is_relative() {
-            self.mining.miner_wallet = base.join(&self.mining.miner_wallet);
+        if let Some(miner_wallet) = &mut self.mining.miner_wallet {
+            if miner_wallet.is_relative() {
+                *miner_wallet = base.join(&miner_wallet);
+            }
         }
     }
 
@@ -113,13 +157,35 @@ impl NodeConfig {
         if self.network.id.trim().is_empty() {
             return Err(WynError::Config("network.id não pode ficar vazio".into()));
         }
+        if self.p2p.enabled {
+            self.p2p
+                .listen
+                .parse::<SocketAddr>()
+                .map_err(|_| WynError::Config("p2p.listen não é um endereço válido".into()))?;
+            if let Some(advertise) = &self.p2p.advertise {
+                advertise.parse::<SocketAddr>().map_err(|_| {
+                    WynError::Config("p2p.advertise não é um endereço válido".into())
+                })?;
+            }
+            if self.p2p.max_peers == 0 || self.p2p.max_peers > 128 {
+                return Err(WynError::Config(
+                    "p2p.max_peers deve estar entre 1 e 128".into(),
+                ));
+            }
+            for seed in &self.p2p.seeds {
+                seed.parse::<SocketAddr>()
+                    .map_err(|_| WynError::Config(format!("seed P2P inválido: {seed}")))?;
+            }
+        }
         if !(1..=8).contains(&self.chain.difficulty) {
             return Err(WynError::Config(
                 "chain.difficulty deve estar entre 1 e 8".into(),
             ));
         }
         if self.chain.block_reward == 0 {
-            return Err(WynError::Config("block_reward deve ser maior que zero".into()));
+            return Err(WynError::Config(
+                "block_reward deve ser maior que zero".into(),
+            ));
         }
         if !(1..=86_400).contains(&self.chain.min_block_interval_seconds) {
             return Err(WynError::Config(
@@ -129,6 +195,20 @@ impl NodeConfig {
         if self.chain.max_transactions_per_block == 0 {
             return Err(WynError::Config(
                 "max_transactions_per_block deve ser maior que zero".into(),
+            ));
+        }
+        if self.mining.enabled
+            && self
+                .mining
+                .miner_address
+                .as_deref()
+                .unwrap_or("")
+                .trim()
+                .is_empty()
+            && self.mining.miner_wallet.is_none()
+        {
+            return Err(WynError::Config(
+                "mining exige miner_address ou miner_wallet".into(),
             ));
         }
         Ok(())

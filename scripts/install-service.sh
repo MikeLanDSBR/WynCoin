@@ -47,7 +47,22 @@ sudo rm -f -- "$GLOBAL_COMMAND"
 sudo install -o root -g root -m 0755 deploy/wyncoin "$GLOBAL_COMMAND"
 
 if ! sudo test -f /etc/wyncoin/node.toml; then
-  sudo install -o root -g wyncoin -m 0640 deploy/node.production.toml /etc/wyncoin/node.toml
+  PERSONAL_WALLET="${WYNCOIN_WALLET:-$HOME/.wyncoin/wallet.json}"
+  if [[ ! -f "$PERSONAL_WALLET" ]]; then
+    install -d -m 0700 "$(dirname "$PERSONAL_WALLET")"
+    (umask 077; target/release/wyncoin-wallet new --output "$PERSONAL_WALLET")
+    echo "Carteira pessoal criada para receber a mineração: $PERSONAL_WALLET"
+  fi
+  MINER_ADDRESS="$(target/release/wyncoin-wallet address --file "$PERSONAL_WALLET")"
+  if [[ ! "$MINER_ADDRESS" =~ ^WYN[0-9a-f]+$ ]]; then
+    echo "Não foi possível obter um endereço válido da carteira pessoal." >&2
+    exit 1
+  fi
+  sed "s/__WYNCOIN_MINER_ADDRESS__/$MINER_ADDRESS/" deploy/node.public-testnet.toml \
+    | sudo tee /etc/wyncoin/node.toml >/dev/null
+  sudo chown root:wyncoin /etc/wyncoin/node.toml
+  sudo chmod 0640 /etc/wyncoin/node.toml
+  echo "Testnet pública configurada; recompensa de mineração: $MINER_ADDRESS"
 else
   echo "Configuração existente preservada: /etc/wyncoin/node.toml"
 fi

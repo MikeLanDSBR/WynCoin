@@ -13,9 +13,9 @@ Uso: ./scripts/wipe.sh [local|wallet|service]
 
 Sem argumentos, abre um menu interativo.
 
-  local    remove a blockchain e as carteiras ativas de data/
+  local    remove a blockchain e as carteiras ativas de data/ (desenvolvimento)
   wallet   remove somente a carteira pessoal padrão do usuário atual
-  service  remove completamente a instalação systemd da WynCoin
+  service  remove completamente a instalação systemd e o estado da testnet
 EOF
 }
 

@@ -138,11 +138,7 @@ impl Blockchain {
             .iter()
             .take(self.params.max_transactions_per_block)
         {
-            let fee = Self::validate_regular_transaction(
-                transaction,
-                &temp_utxo,
-                &HashSet::new(),
-            )?;
+            let fee = Self::validate_regular_transaction(transaction, &temp_utxo, &HashSet::new())?;
             Self::apply_regular_transaction(transaction, &mut temp_utxo);
             fees = fees
                 .checked_add(fee)
@@ -198,6 +194,57 @@ impl Blockchain {
         Ok(())
     }
 
+    /// Identifica tanto o gênesis quanto as regras que definem consenso.
+    /// Nós com parâmetros diferentes não podem compartilhar blocos.
+    pub fn chain_id(&self) -> String {
+        use sha2::{Digest, Sha256};
+        let mut hasher = Sha256::new();
+        hasher.update(self.chain[0].hash.as_bytes());
+        hasher.update(self.params.network_id.as_bytes());
+        hasher.update(self.params.difficulty.to_le_bytes());
+        hasher.update(self.params.block_reward.to_le_bytes());
+        hasher.update(self.params.min_block_interval_seconds.to_le_bytes());
+        hasher.update((self.params.max_transactions_per_block as u64).to_le_bytes());
+        hex::encode(hasher.finalize())
+    }
+
+    pub fn cumulative_work(&self) -> u128 {
+        // A dificuldade ainda é fixa, mas a fórmula já preserva a semântica
+        // necessária para comparar cadeias se o reajuste for introduzido.
+        self.chain.iter().skip(1).fold(0u128, |total, block| {
+            total.saturating_add(16u128.saturating_pow(block.header.difficulty))
+        })
+    }
+
+    /// Troca a cadeia somente quando a candidata é válida e tem mais trabalho.
+    /// Empates usam o hash do topo como desempate determinístico, evitando que
+    /// nós permaneçam divididos entre dois forks de mesmo trabalho.
+    /// O mempool local é reaplicado contra o novo conjunto de UTXO.
+    pub fn replace_if_heavier(&mut self, candidate: Vec<Block>) -> Result<bool> {
+        let candidate_utxo = Self::validate_chain_and_build_utxo(&self.params, &candidate)?;
+        let candidate_work = candidate.iter().skip(1).fold(0u128, |total, block| {
+            total.saturating_add(16u128.saturating_pow(block.header.difficulty))
+        });
+        let local_work = self.cumulative_work();
+        let candidate_tip = candidate
+            .last()
+            .map(|block| block.hash.as_str())
+            .unwrap_or("");
+        if candidate_work < local_work
+            || (candidate_work == local_work && candidate_tip >= self.last_block().hash.as_str())
+        {
+            return Ok(false);
+        }
+
+        let old_mempool = std::mem::take(&mut self.mempool);
+        self.chain = candidate;
+        self.utxo_set = candidate_utxo;
+        for transaction in old_mempool {
+            let _ = self.add_to_mempool(transaction);
+        }
+        Ok(true)
+    }
+
     fn validate_next_block(&self, block: &Block) -> Result<HashMap<UtxoKey, TxOutput>> {
         let previous = self.last_block();
         if block.index != previous.index + 1 {
@@ -207,7 +254,9 @@ impl Blockchain {
             return Err(WynError::Validation("hash anterior inválido".into()));
         }
         if block.header.timestamp < previous.header.timestamp {
-            return Err(WynError::Validation("timestamp anterior ao bloco precedente".into()));
+            return Err(WynError::Validation(
+                "timestamp anterior ao bloco precedente".into(),
+            ));
         }
         Self::validate_min_block_interval(&self.params, previous, block)?;
 
@@ -327,11 +376,7 @@ impl Blockchain {
         let mut working = utxo.clone();
         let mut fees = 0u64;
         for transaction in block.transactions.iter().skip(1) {
-            let fee = Self::validate_regular_transaction(
-                transaction,
-                &working,
-                &HashSet::new(),
-            )?;
+            let fee = Self::validate_regular_transaction(transaction, &working, &HashSet::new())?;
             Self::apply_regular_transaction(transaction, &mut working);
             fees = fees
                 .checked_add(fee)
@@ -355,7 +400,9 @@ impl Blockchain {
             || !transaction.inputs.is_empty()
             || transaction.outputs.len() != 1
         {
-            return Err(WynError::Validation("estrutura da coinbase inválida".into()));
+            return Err(WynError::Validation(
+                "estrutura da coinbase inválida".into(),
+            ));
         }
         if !transaction.has_valid_id()? {
             return Err(WynError::Validation("ID da coinbase inválido".into()));
@@ -369,7 +416,9 @@ impl Blockchain {
             .ok_or_else(|| WynError::Validation("overflow na coinbase".into()))?;
         let output = &transaction.outputs[0];
         if output.recipient.trim().is_empty() || output.amount != expected {
-            return Err(WynError::Validation("recompensa da coinbase inválida".into()));
+            return Err(WynError::Validation(
+                "recompensa da coinbase inválida".into(),
+            ));
         }
         Ok(())
     }
@@ -442,10 +491,7 @@ impl Blockchain {
             .ok_or_else(|| WynError::Validation("saldo insuficiente".into()))
     }
 
-    fn apply_regular_transaction(
-        transaction: &Transaction,
-        utxo: &mut HashMap<UtxoKey, TxOutput>,
-    ) {
+    fn apply_regular_transaction(transaction: &Transaction, utxo: &mut HashMap<UtxoKey, TxOutput>) {
         for input in &transaction.inputs {
             utxo.remove(&(input.tx_id.clone(), input.output_index));
         }
@@ -494,9 +540,11 @@ mod tests {
         let mut blockchain = Blockchain::new(params());
         blockchain.mine_and_commit(&wallet.address).unwrap();
         blockchain.validate_full_chain().unwrap();
-        assert_eq!(blockchain.balance_of(&wallet.address).unwrap(), 5_000_000_000);
+        assert_eq!(
+            blockchain.balance_of(&wallet.address).unwrap(),
+            5_000_000_000
+        );
     }
-
 
     #[test]
     fn signs_spends_and_confirms_transaction() {
@@ -542,5 +590,20 @@ mod tests {
         assert!(error
             .to_string()
             .contains("confirmado antes do intervalo mínimo"));
+    }
+
+    #[test]
+    fn only_replaces_chain_with_more_accumulated_work() {
+        let wallet = Wallet::generate().unwrap();
+        let mut local = Blockchain::new(params());
+        local.mine_and_commit(&wallet.address).unwrap();
+
+        let mut remote = Blockchain::new(params());
+        remote.mine_and_commit(&wallet.address).unwrap();
+        remote.mine_and_commit(&wallet.address).unwrap();
+
+        assert!(local.replace_if_heavier(remote.chain.clone()).unwrap());
+        assert_eq!(local.height(), 2);
+        assert!(!local.replace_if_heavier(remote.chain).unwrap());
     }
 }

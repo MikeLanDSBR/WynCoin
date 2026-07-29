@@ -1,9 +1,8 @@
 # WynCoin v0.1.0
 
-Primeira versão persistente e executável da WynCoin. Este projeto é uma rede
-privada experimental: ele executa Proof of Work real segundo as regras da
-WynCoin, mas ainda não é descentralizado, não é compatível com Bitcoin e não
-deve custodiar dinheiro real.
+Versão experimental da WynCoin com nó persistente e testnet P2P. Ela não é
+compatível com Bitcoin, não deve custodiar dinheiro real e suas regras ainda
+podem mudar de forma incompatível.
 
 ## Estrutura
 
@@ -123,7 +122,7 @@ A altura e os saldos devem continuar iguais depois da reinicialização.
 
 ## Instalar como serviço
 
-Em um VPS Debian/Ubuntu:
+Em uma máquina Linux com systemd:
 
 ```bash
 ./scripts/install-service.sh
@@ -131,6 +130,10 @@ sudo systemctl status wyncoind
 sudo systemctl status wyncoin-explorer
 sudo journalctl -u wyncoind -f
 ```
+
+Em instalação nova, o instalador cria `~/.wyncoin/wallet.json` antes de iniciar
+o serviço e usa o endereço dessa carteira para receber as recompensas. A chave
+privada continua apenas no usuário que instalou; o serviço não precisa dela.
 
 O instalador mantém o nó e o Explorer ativos no boot. O Explorer fica disponível
 somente no próprio servidor em `http://127.0.0.1:8080`; use túnel SSH ou um
@@ -148,8 +151,8 @@ wyncoin wallet info
 wyncoin wallet balance
 ```
 
-Uma carteira pessoal é um arquivo JSON que contém a chave privada; ela não é
-criada automaticamente pela instalação. Para criar e usar uma carteira:
+Uma carteira pessoal é um arquivo JSON que contém a chave privada. Para criar
+ou usar outra carteira:
 
 ```bash
 wyncoin wallet create
@@ -187,15 +190,33 @@ carteira pessoal padrão em `~/.wyncoin/wallet.json`. `service` exige `sudo` e
 remove os serviços, binários, configuração e dados de produção em
 `/var/lib/wyncoin`. Todas as operações exigem confirmação textual explícita.
 
-A API permanece apenas em `127.0.0.1:9332`. Não altere para `0.0.0.0` nesta
-versão: o protocolo ainda não possui autenticação nem TLS.
+## Testnet P2P
+
+Instalações novas entram na `wyncoin-public-testnet-v1` e usam
+`191.252.204.223:9333` como seed inicial. A porta `9332` permanece uma API
+administrativa apenas local. A porta P2P é `9333`; ela pode ficar acessível na
+VPS seed, mas nós atrás de NAT podem somente fazer conexão de saída ao seed.
+
+O nó sincroniza com um peer compatível antes de começar a minerar. O handshake
+valida versão, gênesis e regras de consenso; blocos e transações são propagados
+em mensagens P2P separadas da API. Para tornar um nó acessível como peer
+descoberto, configure seu endereço público em `p2p.advertise` no
+`/etc/wyncoin/node.toml`, por exemplo `"191.252.204.223:9333"` na VPS, e
+reinicie o serviço. Nunca configure `p2p.advertise` com `0.0.0.0`.
+
+Uma instalação privada já existente é preservada por segurança. Para migrá-la
+para a testnet, faça backup, execute o wipe de serviço conscientemente e instale
+novamente; não misture os bancos das duas redes.
 
 ## Segurança e limitações conhecidas
 
 - A chave privada é salva em JSON sem senha, com permissão `0600` no Unix.
 - RSA será mantido apenas durante a fase experimental.
 - A dificuldade é fixa e representada por zeros hexadecimais.
-- Não existe rede P2P, forks, reorganização ou consenso entre vários nós.
+- A testnet usa dificuldade fixa; não há reajuste, halving, emissão máxima ou
+  maturidade de coinbase.
+- O P2P ainda não possui autenticação criptográfica de identidade, proteção
+  Sybil, NAT traversal ou auditoria independente.
 - Não existe halving, limite final de emissão ou maturidade da coinbase.
 - A mineração é single-thread.
 - O protocolo TCP é exclusivamente local e administrativo.

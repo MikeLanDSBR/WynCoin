@@ -5,10 +5,35 @@ use std::time::Duration;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::blockchain::Transaction;
+use crate::blockchain::{Block, Transaction};
 use crate::{Result, WynError};
 
 pub const MAX_REQUEST_BYTES: usize = 1_048_576;
+pub const MAX_P2P_MESSAGE_BYTES: usize = 2_097_152;
+pub const P2P_PROTOCOL_VERSION: u32 = 1;
+
+/// Mensagens exclusivas da porta P2P. A API local nunca é exposta nesta porta.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type", content = "data", rename_all = "snake_case")]
+pub enum P2pMessage {
+    Hello(PeerHello),
+    GetBlocks { start_height: u64, limit: usize },
+    Blocks { blocks: Vec<Block>, has_more: bool },
+    AnnounceBlock { block: Block },
+    AnnounceTransaction { transaction: Transaction },
+    Peers { peers: Vec<String> },
+    Error { message: String },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PeerHello {
+    pub protocol_version: u32,
+    pub network_id: String,
+    pub chain_id: String,
+    pub height: u64,
+    pub tip_hash: String,
+    pub listen_address: Option<String>,
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "method", content = "params", rename_all = "snake_case")]
@@ -63,7 +88,9 @@ impl ApiResponse {
     pub fn require_data<T: for<'de> Deserialize<'de>>(&self) -> Result<T> {
         if !self.ok {
             return Err(WynError::Protocol(
-                self.error.clone().unwrap_or_else(|| "erro desconhecido".into()),
+                self.error
+                    .clone()
+                    .unwrap_or_else(|| "erro desconhecido".into()),
             ));
         }
         let data = self

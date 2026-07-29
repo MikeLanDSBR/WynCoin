@@ -45,6 +45,11 @@ impl Storage {
                 data TEXT NOT NULL
             );
 
+            CREATE TABLE IF NOT EXISTS peers (
+                address TEXT PRIMARY KEY,
+                last_seen INTEGER NOT NULL
+            );
+
             INSERT INTO metadata(key, value)
             VALUES ('schema_version', '1')
             ON CONFLICT(key) DO NOTHING;
@@ -66,9 +71,8 @@ impl Storage {
 
     pub fn load_mempool(&self) -> Result<Vec<Transaction>> {
         let connection = self.open()?;
-        let mut statement = connection.prepare(
-            "SELECT data FROM mempool ORDER BY received_at ASC, txid ASC",
-        )?;
+        let mut statement =
+            connection.prepare("SELECT data FROM mempool ORDER BY received_at ASC, txid ASC")?;
         let rows = statement.query_map([], |row| row.get::<_, String>(0))?;
         let mut transactions = Vec::new();
         for row in rows {
@@ -130,6 +134,53 @@ impl Storage {
             )?;
         }
         transaction.commit()?;
+        Ok(())
+    }
+
+    pub fn replace_chain(&self, blocks: &[Block], mempool: &[Transaction]) -> Result<()> {
+        let mut connection = self.open()?;
+        let transaction = connection.transaction()?;
+        transaction.execute("DELETE FROM blocks", [])?;
+        for block in blocks {
+            transaction.execute(
+                "INSERT INTO blocks(height, hash, previous_hash, data) VALUES (?1, ?2, ?3, ?4)",
+                params![
+                    block.index,
+                    &block.hash,
+                    &block.header.prev_hash,
+                    serde_json::to_string(block)?
+                ],
+            )?;
+        }
+        transaction.execute("DELETE FROM mempool", [])?;
+        for item in mempool {
+            transaction.execute(
+                "INSERT INTO mempool(txid, received_at, data) VALUES (?1, ?2, ?3)",
+                params![&item.id, item.timestamp, serde_json::to_string(item)?],
+            )?;
+        }
+        transaction.commit()?;
+        Ok(())
+    }
+
+    pub fn load_peers(&self, limit: usize) -> Result<Vec<String>> {
+        let connection = self.open()?;
+        let mut statement = connection
+            .prepare("SELECT address FROM peers ORDER BY last_seen DESC, address ASC LIMIT ?1")?;
+        let rows = statement.query_map([limit as i64], |row| row.get::<_, String>(0))?;
+        let mut peers = Vec::new();
+        for row in rows {
+            peers.push(row?);
+        }
+        Ok(peers)
+    }
+
+    pub fn remember_peer(&self, address: &str, last_seen: i64) -> Result<()> {
+        let connection = self.open()?;
+        connection.execute(
+            "INSERT INTO peers(address, last_seen) VALUES (?1, ?2) ON CONFLICT(address) DO UPDATE SET last_seen = excluded.last_seen",
+            params![address, last_seen],
+        )?;
         Ok(())
     }
 
