@@ -21,7 +21,9 @@ NoNewPrivileges=true
 PrivateTmp=true
 ProtectHome=true
 ProtectSystem=strict
-ReadOnlyPaths=/var/lib/wyncoin
+# O Explorer abre o SQLite em modo somente leitura, mas o WAL pode exigir o
+# arquivo auxiliar blockchain.db-shm para uma leitura consistente.
+ReadWritePaths=/var/lib/wyncoin
 
 [Install]
 WantedBy=multi-user.target
