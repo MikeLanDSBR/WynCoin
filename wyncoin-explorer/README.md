@@ -6,12 +6,14 @@ Ele inicia um servidor HTTP em `http://127.0.0.1:8080`, consulta o `wyncoind` em
 
 - status do nó e da mineração;
 - altura, tip hash, dificuldade, recompensa e uptime;
-- lista paginada de blocos;
+- painel da rede com oferta emitida por coinbase, ritmo médio recente dos blocos e valor pendente no mempool;
+- páginas navegáveis por URL para blocos, transações, endereços, mempool e estado da rede;
+- lista paginada de blocos e transações;
 - detalhes de cabeçalho, Merkle root, nonce e tamanho;
 - transações confirmadas e pendentes;
 - inputs, outputs e valores em WYN;
 - pesquisa por altura, block hash, TXID ou endereço;
-- saldo e histórico de um endereço;
+- saldo, UTXOs confirmados e histórico recente de um endereço;
 - mempool com atualização automática.
 
 A interface não possui endpoints para minerar, enviar transações ou alterar o banco.
@@ -117,9 +119,10 @@ Todos são somente leitura:
 GET /api/health
 GET /api/status
 GET /api/blocks?limit=20&before=100
-GET /api/block/10
+GET /api/block/<altura-ou-hash>
+GET /api/transactions?limit=25&before_height=100
 GET /api/transaction/<txid>
-GET /api/address/<address>
+GET /api/address/<address>?limit=50
 GET /api/mempool
 GET /api/search?q=<altura|hash|txid|endereço>
 ```
@@ -167,3 +170,5 @@ sudo journalctl -u wyncoin-explorer -f
 ## Limites desta primeira versão
 
 O explorador recarrega os blocos do SQLite em memória e mantém cache curto. Isso é adequado para a rede local v0.1.0, mas deverá ser substituído por índices próprios quando a chain crescer muito.
+
+As métricas exibidas são somente aquelas verificáveis pelo banco ou pelo status local do nó. Em particular, hashrate global, quantidade de peers e estimativa de taxas não são exibidos: o protocolo atual ainda não fornece telemetria confiável para calculá-los. Esses dados exigem uma evolução separada de `wyncoind` e `wyncoin-core`.

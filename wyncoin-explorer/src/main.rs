@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::io::{ErrorKind, Read, Write};
 use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::path::PathBuf;
@@ -109,8 +109,15 @@ struct ChainStats {
     transactions: usize,
     regular_transactions: usize,
     coinbase_transactions: usize,
+    issued_supply_atomic: String,
+    issued_supply_wyn: String,
     total_output_atomic: String,
     total_output_wyn: String,
+    mempool_total_atomic: String,
+    mempool_total_wyn: String,
+    average_block_interval_seconds: Option<u64>,
+    miners_seen: usize,
+    latest_block_timestamp: Option<i64>,
 }
 
 #[derive(Serialize, Clone)]
@@ -194,7 +201,26 @@ struct AddressView {
     received_wyn: String,
     sent_atomic: String,
     sent_wyn: String,
+    utxos: Vec<UtxoView>,
     activity: Vec<AddressActivity>,
+}
+
+#[derive(Serialize)]
+struct UtxoView {
+    transaction_id: String,
+    output_index: usize,
+    block_height: u64,
+    confirmations: u64,
+    timestamp: i64,
+    amount_atomic: String,
+    amount_wyn: String,
+}
+
+#[derive(Serialize)]
+struct TransactionsPage {
+    items: Vec<TransactionLocation>,
+    next_before_height: Option<u64>,
+    total_transactions: usize,
 }
 
 #[derive(Serialize)]
@@ -349,6 +375,7 @@ fn handle_http_connection(
         "/api/health" => api_health(state, explorer_url, &mut stream, head_only),
         "/api/status" => api_status(state, explorer_url, &mut stream, head_only),
         "/api/blocks" => api_blocks(state, &query, &mut stream, head_only),
+        "/api/transactions" => api_transactions(state, &query, &mut stream, head_only),
         "/api/mempool" => api_mempool(state, &mut stream, head_only),
         "/api/search" => api_search(state, &query, &mut stream, head_only),
         _ if path.starts_with("/api/block/") => {
@@ -361,7 +388,7 @@ fn handle_http_connection(
         }
         _ if path.starts_with("/api/address/") => {
             let value = percent_decode(path.trim_start_matches("/api/address/"))?;
-            api_address(state, &value, &mut stream, head_only)
+            api_address(state, &value, &query, &mut stream, head_only)
         }
         _ if path.starts_with("/api/") => {
             send_json_error(&mut stream, 404, "endpoint não encontrado", head_only)
@@ -601,6 +628,42 @@ fn api_status(
             .flat_map(|transaction| &transaction.outputs)
             .try_fold(0u64, |total, output| total.checked_add(output.amount))
             .ok_or_else(|| WynError::Validation("overflow nas estatísticas da chain".into()))?;
+        let issued_supply = snapshot
+            .blocks
+            .iter()
+            .flat_map(|block| &block.transactions)
+            .filter(|transaction| transaction.is_coinbase)
+            .flat_map(|transaction| &transaction.outputs)
+            .try_fold(0u64, |total, output| total.checked_add(output.amount))
+            .ok_or_else(|| WynError::Validation("overflow na oferta emitida".into()))?;
+        let mempool_total = snapshot
+            .mempool
+            .iter()
+            .try_fold(0u64, |total, transaction| {
+                total
+                    .checked_add(transaction.checked_total_output()?)
+                    .ok_or_else(|| WynError::Validation("overflow no mempool".into()))
+            })?;
+        let mut miners = HashSet::new();
+        for block in &snapshot.blocks {
+            if let Some(output) = block
+                .transactions
+                .first()
+                .filter(|transaction| transaction.is_coinbase)
+                .and_then(|transaction| transaction.outputs.first())
+            {
+                miners.insert(output.recipient.as_str());
+            }
+        }
+        let recent_blocks = snapshot.blocks.iter().rev().take(145).collect::<Vec<_>>();
+        let average_block_interval_seconds = recent_blocks
+            .first()
+            .zip(recent_blocks.last())
+            .and_then(|(newest, oldest)| {
+                let intervals = recent_blocks.len().checked_sub(1)? as i64;
+                let elapsed = newest.header.timestamp.checked_sub(oldest.header.timestamp)?;
+                (intervals > 0 && elapsed >= 0).then(|| (elapsed / intervals) as u64)
+            });
 
         Ok(ExplorerStatus {
             explorer_version: env!("CARGO_PKG_VERSION"),
@@ -611,8 +674,15 @@ fn api_status(
                 transactions,
                 regular_transactions: transactions.saturating_sub(coinbase_transactions),
                 coinbase_transactions,
+                issued_supply_atomic: issued_supply.to_string(),
+                issued_supply_wyn: format_wyn(issued_supply),
                 total_output_atomic: total_output.to_string(),
                 total_output_wyn: format_wyn(total_output),
+                mempool_total_atomic: mempool_total.to_string(),
+                mempool_total_wyn: format_wyn(mempool_total),
+                average_block_interval_seconds,
+                miners_seen: miners.len(),
+                latest_block_timestamp: snapshot.blocks.last().map(|block| block.header.timestamp),
             },
         })
     })
@@ -668,16 +738,62 @@ fn api_block(
     head_only: bool,
 ) -> Result<()> {
     respond_with(stream, head_only, || {
-        let height = value
-            .parse::<u64>()
-            .map_err(|_| WynError::Validation("altura de bloco inválida".into()))?;
         let snapshot = state.snapshot()?;
-        let block = snapshot
-            .blocks
-            .iter()
-            .find(|block| block.index == height)
+        let block = value
+            .parse::<u64>()
+            .ok()
+            .and_then(|height| snapshot.blocks.iter().find(|block| block.index == height))
+            .or_else(|| snapshot.blocks.iter().find(|block| block.hash == value))
             .ok_or_else(|| WynError::Validation("bloco não encontrado".into()))?;
         Ok(block_details(block, snapshot.status.height)?)
+    })
+}
+
+fn api_transactions(
+    state: &ExplorerState,
+    query: &HashMap<String, String>,
+    stream: &mut TcpStream,
+    head_only: bool,
+) -> Result<()> {
+    respond_with(stream, head_only, || {
+        let snapshot = state.snapshot()?;
+        let limit = query
+            .get("limit")
+            .and_then(|value| value.parse::<usize>().ok())
+            .unwrap_or(25)
+            .clamp(1, 100);
+        let before_height = query
+            .get("before_height")
+            .and_then(|value| value.parse::<u64>().ok())
+            .unwrap_or(snapshot.status.height);
+        let mut items = Vec::with_capacity(limit);
+        for block in snapshot.blocks.iter().rev().filter(|block| block.index <= before_height) {
+            for transaction in block.transactions.iter().rev() {
+                items.push(TransactionLocation {
+                    transaction: transaction_view(transaction, Some(block.index), snapshot.status.height)?,
+                    block: Some(block_summary(block)?),
+                    in_mempool: false,
+                });
+            }
+            // A paginação avança por altura. Mantemos o bloco inteiro para não
+            // omitir transações quando o limite cai no meio de um bloco.
+            if items.len() >= limit {
+                break;
+            }
+        }
+        let next_before_height = items
+            .last()
+            .and_then(|item| item.transaction.block_height)
+            .and_then(|height| height.checked_sub(1));
+        Ok(TransactionsPage {
+            items,
+            next_before_height,
+            total_transactions: snapshot
+                .blocks
+                .iter()
+                .map(|block| block.transactions.len())
+                .sum(),
+        })
     })
 }
 
@@ -697,6 +813,7 @@ fn api_transaction(
 fn api_address(
     state: &ExplorerState,
     address: &str,
+    query: &HashMap<String, String>,
     stream: &mut TcpStream,
     head_only: bool,
 ) -> Result<()> {
@@ -705,7 +822,12 @@ fn api_address(
             return Err(WynError::Validation("endereço inválido".into()));
         }
         let snapshot = state.snapshot()?;
-        build_address_view(&snapshot, address)
+        let limit = query
+            .get("limit")
+            .and_then(|value| value.parse::<usize>().ok())
+            .unwrap_or(50)
+            .clamp(1, 200);
+        build_address_view(&snapshot, address, limit)
     })
 }
 
@@ -764,7 +886,7 @@ fn api_search(
             }));
         }
 
-        let address = build_address_view(&snapshot, term)?;
+        let address = build_address_view(&snapshot, term, 50)?;
         if address.activity.is_empty() && address.confirmed_balance_atomic == "0" {
             return Err(WynError::Validation(
                 "nenhum bloco, transação ou endereço foi encontrado".into(),
@@ -916,8 +1038,10 @@ fn find_transaction(snapshot: &Snapshot, transaction_id: &str) -> Option<Transac
     None
 }
 
-fn build_address_view(snapshot: &Snapshot, address: &str) -> Result<AddressView> {
+fn build_address_view(snapshot: &Snapshot, address: &str, activity_limit: usize) -> Result<AddressView> {
     let mut output_index: HashMap<(String, usize), (String, u64)> = HashMap::new();
+    let mut outputs: HashMap<(String, usize), UtxoView> = HashMap::new();
+    let mut spent_outputs = HashSet::new();
     let mut activities = Vec::new();
     let mut received = 0u64;
     let mut sent = 0u64;
@@ -928,6 +1052,7 @@ fn build_address_view(snapshot: &Snapshot, address: &str) -> Result<AddressView>
             let mut outgoing = 0u64;
 
             for input in &transaction.inputs {
+                spent_outputs.insert((input.tx_id.clone(), input.output_index));
                 if let Some((owner, amount)) =
                     output_index.get(&(input.tx_id.clone(), input.output_index))
                 {
@@ -949,6 +1074,20 @@ fn build_address_view(snapshot: &Snapshot, address: &str) -> Result<AddressView>
                     (transaction.id.clone(), index),
                     (output.recipient.clone(), output.amount),
                 );
+                if output.recipient == address {
+                    outputs.insert(
+                        (transaction.id.clone(), index),
+                        UtxoView {
+                            transaction_id: transaction.id.clone(),
+                            output_index: index,
+                            block_height: block.index,
+                            confirmations: snapshot.status.height.saturating_sub(block.index).saturating_add(1),
+                            timestamp: transaction.timestamp,
+                            amount_atomic: output.amount.to_string(),
+                            amount_wyn: format_wyn(output.amount),
+                        },
+                    );
+                }
             }
 
             if incoming > 0 || outgoing > 0 {
@@ -1004,6 +1143,13 @@ fn build_address_view(snapshot: &Snapshot, address: &str) -> Result<AddressView>
     }
 
     activities.sort_by(|left, right| right.timestamp.cmp(&left.timestamp));
+    activities.truncate(activity_limit);
+    let mut utxos = outputs
+        .into_iter()
+        .filter(|(key, _)| !spent_outputs.contains(key))
+        .map(|(_, output)| output)
+        .collect::<Vec<_>>();
+    utxos.sort_by(|left, right| right.timestamp.cmp(&left.timestamp));
     let confirmed_balance = received
         .checked_sub(sent)
         .ok_or_else(|| WynError::Validation("histórico do endereço ficou inconsistente".into()))?;
@@ -1016,6 +1162,7 @@ fn build_address_view(snapshot: &Snapshot, address: &str) -> Result<AddressView>
         received_wyn: format_wyn(received),
         sent_atomic: sent.to_string(),
         sent_wyn: format_wyn(sent),
+        utxos,
         activity: activities,
     })
 }

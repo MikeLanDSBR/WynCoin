@@ -1,535 +1,76 @@
-const state = {
-  nextBefore: null,
-  loadedBlocks: [],
-  refreshing: false,
-  refreshTimer: null,
-};
-
-const elements = {
-  nodePill: document.querySelector('#node-pill'),
-  nodePillText: document.querySelector('#node-pill-text'),
-  alert: document.querySelector('#connection-alert'),
-  alertError: document.querySelector('#connection-error'),
-  retry: document.querySelector('#retry-button'),
-  searchForm: document.querySelector('#search-form'),
-  searchInput: document.querySelector('#search-input'),
-  height: document.querySelector('#metric-height'),
-  tip: document.querySelector('#metric-tip'),
-  transactions: document.querySelector('#metric-transactions'),
-  mempoolMetric: document.querySelector('#metric-mempool'),
-  mining: document.querySelector('#metric-mining'),
-  difficulty: document.querySelector('#metric-difficulty'),
-  reward: document.querySelector('#metric-reward'),
-  uptime: document.querySelector('#metric-uptime'),
-  blocksBody: document.querySelector('#blocks-body'),
-  blocksRange: document.querySelector('#blocks-range'),
-  loadMore: document.querySelector('#load-more-button'),
-  mempoolCount: document.querySelector('#mempool-count'),
-  mempoolList: document.querySelector('#mempool-list'),
-  networkId: document.querySelector('#network-id'),
-  nodeVersion: document.querySelector('#node-version'),
-  databasePath: document.querySelector('#database-path'),
-  lastUpdate: document.querySelector('#last-update'),
-  explorerVersion: document.querySelector('#explorer-version'),
-  dialog: document.querySelector('#details-dialog'),
-  dialogClose: document.querySelector('#dialog-close'),
-  dialogEyebrow: document.querySelector('#dialog-eyebrow'),
-  dialogTitle: document.querySelector('#dialog-title'),
-  dialogContent: document.querySelector('#dialog-content'),
-  toast: document.querySelector('#toast'),
-};
-
+const state = { status: null, busy: false };
+const app = document.querySelector('#app');
+const nodePill = document.querySelector('#node-pill');
+const nodeState = document.querySelector('#node-state');
+const alertBox = document.querySelector('#connection-alert');
+const alertError = document.querySelector('#connection-error');
 const numberFormat = new Intl.NumberFormat('pt-BR');
-const dateFormat = new Intl.DateTimeFormat('pt-BR', {
-  dateStyle: 'short',
-  timeStyle: 'medium',
-});
+const dateFormat = new Intl.DateTimeFormat('pt-BR', { dateStyle: 'medium', timeStyle: 'medium' });
 
 async function api(path) {
-  const response = await fetch(path, {
-    headers: { Accept: 'application/json' },
-    cache: 'no-store',
-  });
-  let payload;
-  try {
-    payload = await response.json();
-  } catch {
-    throw new Error(`Resposta inválida do explorador (${response.status})`);
-  }
-  if (!response.ok || !payload.ok) {
-    throw new Error(payload.error || `Erro HTTP ${response.status}`);
-  }
+  const response = await fetch(path, { headers: { Accept: 'application/json' }, cache: 'no-store' });
+  const payload = await response.json().catch(() => null);
+  if (!response.ok || !payload?.ok) throw new Error(payload?.error || `Erro HTTP ${response.status}`);
   return payload.data;
 }
 
-function escapeHtml(value) {
-  return String(value ?? '')
-    .replaceAll('&', '&amp;')
-    .replaceAll('<', '&lt;')
-    .replaceAll('>', '&gt;')
-    .replaceAll('"', '&quot;')
-    .replaceAll("'", '&#039;');
-}
+function esc(value) { return String(value ?? '').replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;').replaceAll("'", '&#039;'); }
+function short(value, left = 11, right = 9) { const text = String(value ?? ''); return text.length > left + right + 1 ? `${text.slice(0, left)}…${text.slice(-right)}` : text; }
+function integer(value) { try { return numberFormat.format(BigInt(String(value))); } catch { return String(value ?? '—'); } }
+function wyn(value) { const text = String(value ?? '0.00000000'); const negative = text.startsWith('-'); const [whole, fraction = ''] = (negative ? text.slice(1) : text).split('.'); return `${negative ? '-' : ''}${integer(whole)},${fraction.padEnd(8, '0').slice(0, 8)} WYN`; }
+function time(value) { return value ? dateFormat.format(new Date(Number(value))) : 'Gênesis'; }
+function relative(value) { if (!value) return 'gênesis'; const seconds = Math.max(0, Math.floor((Date.now() - Number(value)) / 1000)); if (seconds < 60) return `há ${seconds}s`; if (seconds < 3600) return `há ${Math.floor(seconds / 60)} min`; if (seconds < 86400) return `há ${Math.floor(seconds / 3600)} h`; return `há ${Math.floor(seconds / 86400)} d`; }
+function interval(seconds) { if (seconds === null || seconds === undefined) return '—'; if (seconds < 60) return `${seconds}s`; return `${Math.floor(seconds / 60)} min ${seconds % 60}s`; }
+function link(path, label, className = 'link') { return `<a class="${className}" href="${path}" data-link>${label}</a>`; }
+function metric(label, value, note = '') { return `<article class="metric"><span>${esc(label)}</span><strong title="${esc(value)}">${esc(value)}</strong><small>${esc(note)}</small></article>`; }
+function details(items) { return `<ul class="data-list">${items.map(([label, value]) => `<li><span>${esc(label)}</span><div>${value}</div></li>`).join('')}</ul>`; }
+function addressLink(address) { return link(`/address/${encodeURIComponent(address)}`, esc(short(address)), 'link mono'); }
+function txLink(id) { return link(`/tx/${encodeURIComponent(id)}`, esc(short(id)), 'link mono'); }
+function blockLink(block) { return link(`/block/${encodeURIComponent(block.height)}`, `#${integer(block.height)}`); }
 
-function shortHash(value, left = 10, right = 8) {
-  const text = String(value || '');
-  if (text.length <= left + right + 1) return text;
-  return `${text.slice(0, left)}…${text.slice(-right)}`;
+function setConnected(status) {
+  state.status = status;
+  nodePill.classList.remove('offline'); nodeState.textContent = 'Nó conectado'; alertBox.hidden = true;
+  document.querySelector('#explorer-version').textContent = `v${status.explorer_version}`;
 }
+function setDisconnected(error) { nodePill.classList.add('offline'); nodeState.textContent = 'Nó indisponível'; alertError.textContent = error.message; alertBox.hidden = false; }
 
-function formatInteger(value) {
-  try {
-    return numberFormat.format(BigInt(String(value)));
-  } catch {
-    return String(value ?? '—');
-  }
-}
-
-function formatWyn(value) {
-  const source = String(value ?? '0.00000000');
-  const negative = source.startsWith('-');
-  const normalized = negative ? source.slice(1) : source;
-  const [whole = '0', fraction = ''] = normalized.split('.');
-  let formattedWhole;
-  try {
-    formattedWhole = numberFormat.format(BigInt(whole || '0'));
-  } catch {
-    formattedWhole = whole || '0';
-  }
-  const padded = fraction.padEnd(8, '0').slice(0, 8);
-  return `${negative ? '-' : ''}${formattedWhole},${padded} WYN`;
-}
-
-function formatDate(timestamp) {
-  if (!timestamp) return 'Gênesis';
-  return dateFormat.format(new Date(Number(timestamp)));
-}
-
-function formatRelative(timestamp) {
-  if (!timestamp) return 'bloco gênesis';
-  const seconds = Math.max(0, Math.floor((Date.now() - Number(timestamp)) / 1000));
-  if (seconds < 10) return 'agora';
-  if (seconds < 60) return `há ${seconds}s`;
-  const minutes = Math.floor(seconds / 60);
-  if (minutes < 60) return `há ${minutes} min`;
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `há ${hours} h`;
-  const days = Math.floor(hours / 24);
-  return `há ${days} d`;
-}
-
-function formatUptime(seconds) {
-  const value = Number(seconds || 0);
-  const days = Math.floor(value / 86400);
-  const hours = Math.floor((value % 86400) / 3600);
-  const minutes = Math.floor((value % 3600) / 60);
-  if (days) return `${days}d ${hours}h ${minutes}min`;
-  if (hours) return `${hours}h ${minutes}min`;
-  return `${minutes}min`;
-}
-
-function formatBytes(bytes) {
-  const value = Number(bytes || 0);
-  if (value < 1024) return `${value} B`;
-  if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KiB`;
-  return `${(value / (1024 * 1024)).toFixed(2)} MiB`;
-}
-
-function showConnected() {
-  elements.nodePill.classList.remove('offline');
-  elements.nodePillText.textContent = 'Nó conectado';
-  elements.alert.hidden = true;
-}
-
-function showDisconnected(error) {
-  elements.nodePill.classList.add('offline');
-  elements.nodePillText.textContent = 'Nó indisponível';
-  elements.alert.hidden = false;
-  elements.alertError.textContent = error?.message || String(error);
-}
-
-function showToast(message) {
-  elements.toast.textContent = message;
-  elements.toast.hidden = false;
-  window.clearTimeout(showToast.timer);
-  showToast.timer = window.setTimeout(() => {
-    elements.toast.hidden = true;
-  }, 2600);
-}
-
-async function refreshDashboard({ resetBlocks = true } = {}) {
-  if (state.refreshing) return;
-  state.refreshing = true;
-  try {
-    const [status, blocks, mempool] = await Promise.all([
-      api('/api/status'),
-      api('/api/blocks?limit=20'),
-      api('/api/mempool'),
-    ]);
-    showConnected();
-    renderStatus(status);
-    if (resetBlocks) {
-      state.loadedBlocks = blocks.items;
-      state.nextBefore = blocks.next_before;
-      renderBlocks(state.loadedBlocks, blocks.total_blocks);
-    }
-    renderMempool(mempool);
-  } catch (error) {
-    showDisconnected(error);
-  } finally {
-    state.refreshing = false;
-  }
-}
-
-function renderStatus(status) {
+async function loadStatus() { const status = await api('/api/status'); setConnected(status); return status; }
+function dashboardMetrics(status) {
   const { node, chain } = status;
-  elements.height.textContent = formatInteger(node.height);
-  elements.tip.textContent = `Tip ${shortHash(node.tip_hash, 7, 6)}`;
-  elements.transactions.textContent = formatInteger(chain.transactions);
-  elements.mempoolMetric.textContent = `${formatInteger(node.mempool_size)} no mempool`;
-  elements.mining.textContent = node.mining_enabled ? 'Ativa' : 'Pausada';
-  elements.mining.style.color = node.mining_enabled ? 'var(--accent-strong)' : 'var(--warning)';
-  elements.difficulty.textContent = `Dificuldade ${node.difficulty}`;
-  elements.reward.textContent = formatWyn(node.block_reward_wyn);
-  elements.uptime.textContent = `Uptime ${formatUptime(node.uptime_seconds)}`;
-  elements.networkId.textContent = node.network_id;
-  elements.nodeVersion.textContent = `v${node.version}`;
-  elements.databasePath.textContent = node.database;
-  elements.databasePath.title = node.database;
-  elements.lastUpdate.textContent = new Date().toLocaleTimeString('pt-BR');
-  elements.explorerVersion.textContent = `v${status.explorer_version}`;
+  return `<section class="metrics">
+    ${metric('Altura da chain', integer(node.height), `Tip ${short(node.tip_hash, 7, 6)}`)}
+    ${metric('Oferta emitida', wyn(chain.issued_supply_wyn), `${integer(chain.coinbase_transactions)} coinbases`)}
+    ${metric('Transações', integer(chain.transactions), `${integer(chain.regular_transactions)} regulares`)}
+    ${metric('Mempool', integer(node.mempool_size), wyn(chain.mempool_total_wyn))}
+  </section>`;
+}
+function blockRows(items) { return items.map(block => `<tr><td>${blockLink(block)}</td><td>${link(`/block/${encodeURIComponent(block.hash)}`, esc(short(block.hash)), 'link mono')}</td><td title="${esc(time(block.timestamp))}">${relative(block.timestamp)}</td><td>${integer(block.transaction_count)}</td><td>${block.miner_address ? addressLink(block.miner_address) : '<span class="muted">Gênesis</span>'}</td><td class="amount">${block.reward_wyn ? wyn(block.reward_wyn) : '—'}</td></tr>`).join(''); }
+function blocksTable(items) { return `<div class="table-wrap"><table><thead><tr><th>Bloco</th><th>Hash</th><th>Tempo</th><th>TXs</th><th>Minerador</th><th>Recompensa</th></tr></thead><tbody>${items.length ? blockRows(items) : '<tr><td colspan="6" class="empty">Nenhum bloco encontrado.</td></tr>'}</tbody></table></div>`; }
+function transactionRows(items) { return items.map(location => { const tx = location.transaction; return `<tr><td>${txLink(tx.id)}</td><td><span class="badge${location.in_mempool ? ' pending' : ''}">${location.in_mempool ? 'Pendente' : `${integer(tx.confirmations)} conf.`}</span></td><td>${tx.block_height === null ? '—' : link(`/block/${tx.block_height}`, `#${integer(tx.block_height)}`)}</td><td>${integer(tx.input_count)} / ${integer(tx.output_count)}</td><td class="amount">${wyn(tx.total_output_wyn)}</td></tr>`; }).join(''); }
+function transactionsTable(items) { return `<div class="table-wrap"><table><thead><tr><th>TXID</th><th>Status</th><th>Bloco</th><th>In / Out</th><th>Valor de outputs</th></tr></thead><tbody>${items.length ? transactionRows(items) : '<tr><td colspan="5" class="empty">Nenhuma transação encontrada.</td></tr>'}</tbody></table></div>`; }
+
+async function home() {
+  const [status, blocks, mempool, txs] = await Promise.all([loadStatus(), api('/api/blocks?limit=12'), api('/api/mempool'), api('/api/transactions?limit=8')]);
+  app.innerHTML = `${dashboardMetrics(status)}<section class="grid"><article class="panel"><header class="section-head"><div><small>LEDGER</small><h2>Blocos recentes</h2></div>${link('/blocks', 'Ver todos')}</header>${blocksTable(blocks.items)}</article><aside class="panel"><header class="section-head"><div><small>AGUARDANDO BLOCO</small><h2>Mempool</h2></div><span class="badge pending">${integer(mempool.length)}</span></header><div class="panel-pad stack">${mempool.length ? mempool.slice(0, 6).map(tx => `<div class="card-row"><div>${txLink(tx.id)}<p>${integer(tx.input_count)} inputs · ${integer(tx.output_count)} outputs</p></div><strong class="amount">${wyn(tx.total_output_wyn)}</strong></div>`).join('') : '<div class="empty">Nenhuma transação pendente.</div>'}</div></aside></section><section class="panel"><header class="section-head"><div><small>ATIVIDADE</small><h2>Transações recentes</h2></div>${link('/transactions', 'Explorar transações')}</header>${transactionsTable(txs.items)}</section>`;
 }
 
-function renderBlocks(blocks, totalBlocks) {
-  if (!blocks.length) {
-    elements.blocksBody.innerHTML = '<tr class="loading-row"><td colspan="6">Nenhum bloco encontrado.</td></tr>';
-    elements.blocksRange.textContent = '0 blocos';
-    elements.loadMore.disabled = true;
-    return;
-  }
+async function blocksPage(before = null) { const [status, page] = await Promise.all([loadStatus(), api(`/api/blocks?limit=50${before === null ? '' : `&before=${before}`}`)]); app.innerHTML = `${dashboardMetrics(status)}${pageTitle('Blocos', `${integer(page.total_blocks)} blocos conhecidos na chain`)}<section class="panel">${blocksTable(page.items)}${page.next_before !== null ? `<div class="pagination"><button data-more-blocks="${page.next_before}">Carregar blocos anteriores</button></div>` : ''}</section>`; }
+async function transactionsPage(before = null) { const [status, page] = await Promise.all([loadStatus(), api(`/api/transactions?limit=50${before === null ? '' : `&before_height=${before}`}`)]); app.innerHTML = `${dashboardMetrics(status)}${pageTitle('Transações', `${integer(page.total_transactions)} transações confirmadas`)}<section class="panel">${transactionsTable(page.items)}${page.next_before_height !== null ? `<div class="pagination"><button data-more-transactions="${page.next_before_height}">Carregar transações anteriores</button></div>` : ''}</section>`; }
+async function mempoolPage() { const [status, transactions] = await Promise.all([loadStatus(), api('/api/mempool')]); app.innerHTML = `${dashboardMetrics(status)}${pageTitle('Mempool', transactions.length ? `${integer(transactions.length)} transações aguardando confirmação` : 'Não há transações pendentes') }<section class="panel">${transactionsTable(transactions.map(transaction => ({ transaction, block: null, in_mempool: true })))}</section>`; }
+function pageTitle(title, subtitle) { return `<header class="page-title"><span class="eyebrow">WYNCOIN LEDGER</span><h2>${esc(title)}</h2><p>${esc(subtitle)}</p></header>`; }
 
-  elements.blocksBody.innerHTML = blocks.map((block) => `
-    <tr>
-      <td><button class="block-button" type="button" data-block-height="${block.height}">#${formatInteger(block.height)}</button></td>
-      <td><button class="hash-button mono" type="button" data-block-height="${block.height}" title="${escapeHtml(block.hash)}">${escapeHtml(shortHash(block.hash))}</button></td>
-      <td title="${escapeHtml(formatDate(block.timestamp))}">${escapeHtml(formatRelative(block.timestamp))}</td>
-      <td>${formatInteger(block.transaction_count)}</td>
-      <td>${block.miner_address ? `<button class="address-button mono" type="button" data-address="${escapeHtml(block.miner_address)}" title="${escapeHtml(block.miner_address)}">${escapeHtml(shortHash(block.miner_address, 8, 5))}</button>` : '<span class="muted">Gênesis</span>'}</td>
-      <td class="reward">${block.reward_wyn ? escapeHtml(formatWyn(block.reward_wyn)) : '—'}</td>
-    </tr>
-  `).join('');
+async function networkPage() { const status = await loadStatus(); const { node, chain } = status; app.innerHTML = `${dashboardMetrics(status)}${pageTitle('Estado da rede', 'Dados que o nó local consegue verificar diretamente')}<section class="grid"><article class="panel panel-pad"><h2>Consenso e chain</h2>${details([['Rede', `<span class="mono">${esc(node.network_id)}</span>`], ['Dificuldade', integer(node.difficulty)], ['Recompensa por bloco', `<span class="amount">${wyn(node.block_reward_wyn)}</span>`], ['Intervalo médio recente', interval(chain.average_block_interval_seconds)], ['Mineradores vistos na chain', integer(chain.miners_seen)], ['Último bloco', chain.latest_block_timestamp ? time(chain.latest_block_timestamp) : '—'], ['Tip hash', `<span class="mono">${esc(node.tip_hash)}</span>`]])}</article><aside class="panel panel-pad"><h2>Serviço local</h2>${details([['Mineração local', node.mining_enabled ? '<span class="amount">Ativa</span>' : '<span class="notice">Pausada</span>'], ['Endereço configurado', addressLink(node.miner_address)], ['Uptime', `${integer(node.uptime_seconds)} segundos`], ['Banco do nó', `<span class="mono">${esc(node.database)}</span>`]])}<p class="notice">Peers e hashrate não aparecem aqui porque o protocolo ainda não fornece medições confiáveis.</p></aside></section>`; }
 
-  const first = blocks[0].height;
-  const last = blocks[blocks.length - 1].height;
-  elements.blocksRange.textContent = `Blocos #${formatInteger(first)} até #${formatInteger(last)} de ${formatInteger(totalBlocks)}`;
-  elements.loadMore.disabled = state.nextBefore === null || state.nextBefore === undefined;
-}
+async function blockPage(value) { const [status, block] = await Promise.all([loadStatus(), api(`/api/block/${encodeURIComponent(value)}`)]); const s = block.summary; app.innerHTML = `${dashboardMetrics(status)}${pageTitle(`Bloco #${integer(s.height)}`, `${integer(block.confirmations)} confirmações`)}<section class="panel panel-pad">${details([['Hash', `<span class="mono">${esc(s.hash)}</span>`], ['Bloco anterior', s.height ? link(`/block/${encodeURIComponent(s.previous_hash)}`, `<span class="mono">${esc(s.previous_hash)}</span>`) : 'Gênesis'], ['Merkle root', `<span class="mono">${esc(s.merkle_root)}</span>`], ['Data', time(s.timestamp)], ['Minerador', s.miner_address ? addressLink(s.miner_address) : '—'], ['Recompensa', s.reward_wyn ? `<span class="amount">${wyn(s.reward_wyn)}</span>` : '—'], ['Dificuldade / nonce', `${integer(s.difficulty)} / ${integer(s.nonce)}`], ['Tamanho / outputs', `${integer(s.size_bytes)} bytes / ${wyn(s.total_output_wyn)} `]])}<h2>Transações incluídas</h2>${transactionsTable(block.transactions.map(transaction => ({ transaction, block: s, in_mempool: false })))}</section>`; }
 
-function renderMempool(transactions) {
-  elements.mempoolCount.textContent = formatInteger(transactions.length);
-  if (!transactions.length) {
-    elements.mempoolList.innerHTML = `
-      <div class="empty-state">
-        <span aria-hidden="true">✓</span>
-        <strong>Mempool vazio</strong>
-        <p>As novas transações aparecerão aqui antes da confirmação.</p>
-      </div>
-    `;
-    return;
-  }
+async function txPage(id) { const [status, location] = await Promise.all([loadStatus(), api(`/api/transaction/${encodeURIComponent(id)}`)]); const tx = location.transaction; app.innerHTML = `${dashboardMetrics(status)}${pageTitle('Transação', location.in_mempool ? 'Pendente no mempool' : `${integer(tx.confirmations)} confirmações`)}<section class="panel panel-pad">${details([['TXID', `<span class="mono">${esc(tx.id)}</span>`], ['Status', location.in_mempool ? '<span class="badge pending">Pendente</span>' : '<span class="badge">Confirmada</span>'], ['Tipo', tx.is_coinbase ? 'Coinbase' : 'Regular'], ['Bloco', tx.block_height === null ? '—' : link(`/block/${tx.block_height}`, `#${integer(tx.block_height)}`)], ['Data', time(tx.timestamp)], ['Valor dos outputs', `<span class="amount">${wyn(tx.total_output_wyn)}</span>`]])}<div class="io"><article class="panel"><h3>Inputs (${integer(tx.input_count)})</h3>${tx.inputs.length ? tx.inputs.map(input => `<div class="card-row"><div>${txLink(input.transaction_id)}<p>Output #${integer(input.output_index)} · chave ${esc(short(input.public_key, 8, 6))}</p></div></div>`).join('') : '<div class="empty">Sem inputs — transação coinbase.</div>'}</article><article class="panel"><h3>Outputs (${integer(tx.output_count)})</h3>${tx.outputs.map(output => `<div class="card-row"><div>${addressLink(output.recipient)}<p>Output #${integer(output.index)}</p></div><strong class="amount">${wyn(output.amount_wyn)}</strong></div>`).join('')}</article></div></section>`; }
 
-  elements.mempoolList.innerHTML = transactions.map((tx) => `
-    <article class="mempool-item">
-      <div class="mempool-item-head">
-        <button class="tx-button mono" type="button" data-txid="${escapeHtml(tx.id)}" title="${escapeHtml(tx.id)}">${escapeHtml(shortHash(tx.id, 9, 7))}</button>
-        <span class="pending-badge">pendente</span>
-      </div>
-      <div class="mempool-item-meta">
-        <span>${formatInteger(tx.input_count)} input(s) · ${formatInteger(tx.output_count)} output(s)</span>
-        <strong class="reward">${escapeHtml(formatWyn(tx.total_output_wyn))}</strong>
-      </div>
-    </article>
-  `).join('');
-}
+async function addressPage(address) { const [status, data] = await Promise.all([loadStatus(), api(`/api/address/${encodeURIComponent(address)}?limit=100`)]); app.innerHTML = `${dashboardMetrics(status)}${pageTitle('Endereço', short(data.address, 20, 16))}<section class="panel panel-pad">${details([['Endereço', `<span class="mono">${esc(data.address)}</span>`], ['Saldo confirmado', `<span class="amount">${wyn(data.confirmed_balance_wyn)}</span>`], ['Recebido', `<span class="amount">${wyn(data.received_wyn)}</span>`], ['Enviado', wyn(data.sent_wyn)]])}<div class="io"><article class="panel"><h3>UTXOs confirmados (${integer(data.utxos.length)})</h3>${data.utxos.length ? data.utxos.map(utxo => `<div class="card-row"><div>${txLink(utxo.transaction_id)}<p>Output #${integer(utxo.output_index)} · bloco ${link(`/block/${utxo.block_height}`, `#${integer(utxo.block_height)}`)}</p></div><strong class="amount">${wyn(utxo.amount_wyn)}</strong></div>`).join('') : '<div class="empty">Nenhum UTXO disponível.</div>'}</article><article class="panel"><h3>Atividade recente (${integer(data.activity.length)})</h3>${data.activity.length ? data.activity.map(item => `<div class="card-row"><div>${txLink(item.transaction_id)}<p>${item.block_height === null ? 'Mempool' : `Bloco #${integer(item.block_height)}`} · ${time(item.timestamp)}</p></div><strong class="${String(item.net_wyn).startsWith('-') ? 'notice' : 'amount'}">${String(item.net_wyn).startsWith('-') ? '' : '+'}${wyn(item.net_wyn)}</strong></div>`).join('') : '<div class="empty">Não há atividade confirmada.</div>'}</article></div></section>`; }
 
-async function loadMoreBlocks() {
-  if (state.nextBefore === null || state.nextBefore === undefined) return;
-  elements.loadMore.disabled = true;
-  elements.loadMore.textContent = 'Carregando…';
-  try {
-    const page = await api(`/api/blocks?limit=20&before=${encodeURIComponent(state.nextBefore)}`);
-    state.loadedBlocks = [...state.loadedBlocks, ...page.items];
-    state.nextBefore = page.next_before;
-    renderBlocks(state.loadedBlocks, page.total_blocks);
-  } catch (error) {
-    showToast(error.message);
-  } finally {
-    elements.loadMore.textContent = 'Carregar anteriores';
-    elements.loadMore.disabled = state.nextBefore === null || state.nextBefore === undefined;
-  }
-}
-
-async function openBlock(height) {
-  openLoading('BLOCO', `Bloco #${formatInteger(height)}`);
-  try {
-    const block = await api(`/api/block/${encodeURIComponent(height)}`);
-    renderBlockDetails(block);
-  } catch (error) {
-    renderDialogError(error);
-  }
-}
-
-async function openTransaction(transactionId) {
-  openLoading('TRANSAÇÃO', shortHash(transactionId, 15, 12));
-  try {
-    const location = await api(`/api/transaction/${encodeURIComponent(transactionId)}`);
-    renderTransactionLocation(location);
-  } catch (error) {
-    renderDialogError(error);
-  }
-}
-
-async function openAddress(address) {
-  openLoading('ENDEREÇO', shortHash(address, 14, 10));
-  try {
-    const data = await api(`/api/address/${encodeURIComponent(address)}`);
-    renderAddressDetails(data);
-  } catch (error) {
-    renderDialogError(error);
-  }
-}
-
-async function runSearch(term) {
-  openLoading('BUSCA', shortHash(term, 18, 12));
-  try {
-    const result = await api(`/api/search?q=${encodeURIComponent(term)}`);
-    if (result.kind === 'block') renderBlockDetails(result.data);
-    else if (result.kind === 'transaction') renderTransactionLocation(result.data);
-    else if (result.kind === 'address') renderAddressDetails(result.data);
-    else throw new Error('Tipo de resultado desconhecido');
-  } catch (error) {
-    renderDialogError(error);
-  }
-}
-
-function openLoading(eyebrow, title) {
-  elements.dialogEyebrow.textContent = eyebrow;
-  elements.dialogTitle.textContent = title;
-  elements.dialogContent.innerHTML = '<div class="empty-state"><span aria-hidden="true">…</span><strong>Consultando a blockchain</strong></div>';
-  if (!elements.dialog.open) elements.dialog.showModal();
-}
-
-function renderDialogError(error) {
-  elements.dialogEyebrow.textContent = 'NÃO ENCONTRADO';
-  elements.dialogTitle.textContent = 'A consulta falhou';
-  elements.dialogContent.innerHTML = `
-    <div class="empty-state">
-      <span aria-hidden="true">!</span>
-      <strong>${escapeHtml(error.message)}</strong>
-      <p>Confira o valor informado e se o wyncoind está em execução.</p>
-    </div>
-  `;
-}
-
-function renderBlockDetails(block) {
-  const summary = block.summary;
-  elements.dialogEyebrow.textContent = 'BLOCO CONFIRMADO';
-  elements.dialogTitle.textContent = `Bloco #${formatInteger(summary.height)}`;
-  elements.dialogContent.innerHTML = `
-    <div class="detail-grid">
-      ${detailStat('Confirmações', formatInteger(block.confirmations))}
-      ${detailStat('Transações', formatInteger(summary.transaction_count))}
-      ${detailStat('Tamanho', formatBytes(summary.size_bytes))}
-      ${detailStat('Dificuldade', formatInteger(summary.difficulty))}
-      ${detailStat('Nonce', formatInteger(summary.nonce))}
-      ${detailStat('Total de outputs', formatWyn(summary.total_output_wyn))}
-    </div>
-    ${dataRow('Hash', copyable(summary.hash))}
-    ${dataRow('Hash anterior', summary.height === 0 ? '<span class="muted">Não existe — bloco gênesis</span>' : `<button class="hash-button mono" type="button" data-block-height="${summary.height - 1}">${escapeHtml(summary.previous_hash)}</button>`)}
-    ${dataRow('Merkle root', copyable(summary.merkle_root))}
-    ${dataRow('Data e hora', escapeHtml(formatDate(summary.timestamp)))}
-    ${dataRow('Minerador', summary.miner_address ? `<button class="address-button mono" type="button" data-address="${escapeHtml(summary.miner_address)}">${escapeHtml(summary.miner_address)}</button>` : '<span class="muted">Bloco gênesis</span>')}
-    ${dataRow('Recompensa', summary.reward_wyn ? `<span class="reward">${escapeHtml(formatWyn(summary.reward_wyn))}</span>` : '—')}
-    <h3 class="section-title">Transações (${formatInteger(block.transactions.length)})</h3>
-    ${block.transactions.length ? block.transactions.map(transactionCard).join('') : '<div class="empty-state"><strong>Nenhuma transação neste bloco.</strong></div>'}
-  `;
-}
-
-function renderTransactionLocation(location) {
-  const tx = location.transaction;
-  elements.dialogEyebrow.textContent = location.in_mempool ? 'TRANSAÇÃO PENDENTE' : 'TRANSAÇÃO CONFIRMADA';
-  elements.dialogTitle.textContent = shortHash(tx.id, 18, 14);
-  elements.dialogContent.innerHTML = `
-    <div class="detail-grid">
-      ${detailStat('Status', location.in_mempool ? 'No mempool' : `${formatInteger(tx.confirmations)} confirmação(ões)`)}
-      ${detailStat('Tipo', tx.is_coinbase ? 'Coinbase' : 'Regular')}
-      ${detailStat('Valor total', formatWyn(tx.total_output_wyn))}
-      ${detailStat('Inputs', formatInteger(tx.input_count))}
-      ${detailStat('Outputs', formatInteger(tx.output_count))}
-      ${detailStat('Bloco', tx.block_height === null ? 'Pendente' : `#${formatInteger(tx.block_height)}`)}
-    </div>
-    ${dataRow('TXID', copyable(tx.id))}
-    ${dataRow('Data e hora', escapeHtml(formatDate(tx.timestamp)))}
-    ${tx.coinbase_data ? dataRow('Dados coinbase', `<span class="mono">${escapeHtml(tx.coinbase_data)}</span>`) : ''}
-    ${renderInputsOutputs(tx)}
-    ${location.block ? `<h3 class="section-title">Incluída no bloco</h3>${blockMiniCard(location.block)}` : ''}
-  `;
-}
-
-function renderAddressDetails(address) {
-  elements.dialogEyebrow.textContent = 'ENDEREÇO WYNCOIN';
-  elements.dialogTitle.textContent = shortHash(address.address, 18, 14);
-  elements.dialogContent.innerHTML = `
-    <div class="detail-grid">
-      ${detailStat('Saldo confirmado', formatWyn(address.confirmed_balance_wyn))}
-      ${detailStat('Total recebido', formatWyn(address.received_wyn))}
-      ${detailStat('Total enviado', formatWyn(address.sent_wyn))}
-    </div>
-    ${dataRow('Endereço', copyable(address.address))}
-    <h3 class="section-title">Atividade (${formatInteger(address.activity.length)})</h3>
-    ${address.activity.length ? address.activity.map(activityCard).join('') : '<div class="empty-state"><strong>Nenhuma atividade encontrada.</strong></div>'}
-  `;
-}
-
-function transactionCard(tx) {
-  return `
-    <article class="transaction-card">
-      <div class="transaction-head">
-        <button class="tx-button mono" type="button" data-txid="${escapeHtml(tx.id)}" title="${escapeHtml(tx.id)}"><strong>${escapeHtml(shortHash(tx.id, 15, 12))}</strong></button>
-        <span class="type-badge">${tx.is_coinbase ? 'coinbase' : 'regular'}</span>
-      </div>
-      <div class="transaction-foot">
-        <span>${formatInteger(tx.input_count)} input(s) · ${formatInteger(tx.output_count)} output(s)</span>
-        <strong class="reward">${escapeHtml(formatWyn(tx.total_output_wyn))}</strong>
-      </div>
-    </article>
-  `;
-}
-
-function blockMiniCard(block) {
-  return `
-    <article class="transaction-card">
-      <div class="transaction-head">
-        <button class="block-button" type="button" data-block-height="${block.height}"><strong>Bloco #${formatInteger(block.height)}</strong></button>
-        <span class="type-badge">${formatInteger(block.transaction_count)} TXs</span>
-      </div>
-      <div class="transaction-foot mono">
-        <span>${escapeHtml(shortHash(block.hash, 14, 12))}</span>
-        <span>${escapeHtml(formatDate(block.timestamp))}</span>
-      </div>
-    </article>
-  `;
-}
-
-function renderInputsOutputs(tx) {
-  const inputs = tx.inputs.length
-    ? tx.inputs.map((input) => `
-        <div class="io-item">
-          <button class="tx-button mono" type="button" data-txid="${escapeHtml(input.transaction_id)}">${escapeHtml(shortHash(input.transaction_id, 10, 8))}:${input.output_index}</button>
-          <span class="muted">Assinatura ${escapeHtml(shortHash(input.signature, 8, 6))}</span>
-        </div>
-      `).join('')
-    : '<div class="io-item muted">Sem inputs (coinbase)</div>';
-
-  const outputs = tx.outputs.length
-    ? tx.outputs.map((output) => `
-        <div class="io-item">
-          <button class="address-button mono" type="button" data-address="${escapeHtml(output.recipient)}">${escapeHtml(shortHash(output.recipient, 10, 7))}</button>
-          <span class="io-amount">#${output.index} · ${escapeHtml(formatWyn(output.amount_wyn))}</span>
-        </div>
-      `).join('')
-    : '<div class="io-item muted">Sem outputs</div>';
-
-  return `
-    <div class="io-columns">
-      <section class="io-box"><h4>Inputs</h4>${inputs}</section>
-      <section class="io-box"><h4>Outputs</h4>${outputs}</section>
-    </div>
-  `;
-}
-
-function activityCard(activity) {
-  const netValue = String(activity.net_wyn || '0');
-  const negative = netValue.startsWith('-');
-  const neutral = /^-?0\.0+$/.test(netValue);
-  const netClass = neutral ? 'muted' : negative ? 'net-negative' : 'net-positive';
-  const prefix = !negative && !neutral ? '+' : '';
-  return `
-    <article class="activity-card">
-      <div class="activity-head">
-        <button class="tx-button mono" type="button" data-txid="${escapeHtml(activity.transaction_id)}"><strong>${escapeHtml(shortHash(activity.transaction_id, 14, 11))}</strong></button>
-        <strong class="${netClass}">${prefix}${escapeHtml(formatWyn(activity.net_wyn))}</strong>
-      </div>
-      <div class="transaction-foot">
-        <span>${activity.block_height === null ? 'Mempool' : `Bloco #${formatInteger(activity.block_height)}`} · ${escapeHtml(formatDate(activity.timestamp))}</span>
-        <span>${activity.is_coinbase ? 'Coinbase' : `${formatInteger(activity.confirmations)} conf.`}</span>
-      </div>
-    </article>
-  `;
-}
-
-function detailStat(label, value) {
-  return `<div class="detail-stat"><span>${escapeHtml(label)}</span><strong>${escapeHtml(value)}</strong></div>`;
-}
-
-function dataRow(label, valueHtml) {
-  return `<div class="data-row"><span>${escapeHtml(label)}</span><div class="data-value">${valueHtml}</div></div>`;
-}
-
-function copyable(value) {
-  const escaped = escapeHtml(value);
-  return `<span class="mono">${escaped}</span><button class="copy-button" type="button" data-copy="${escaped}">copiar</button>`;
-}
-
-async function copyValue(value) {
-  try {
-    await navigator.clipboard.writeText(value);
-    showToast('Copiado para a área de transferência.');
-  } catch {
-    showToast('Não foi possível copiar automaticamente.');
-  }
-}
-
-function handleActionClick(event) {
-  const blockButton = event.target.closest('[data-block-height]');
-  if (blockButton) {
-    openBlock(blockButton.dataset.blockHeight);
-    return;
-  }
-  const txButton = event.target.closest('[data-txid]');
-  if (txButton) {
-    openTransaction(txButton.dataset.txid);
-    return;
-  }
-  const addressButton = event.target.closest('[data-address]');
-  if (addressButton) {
-    openAddress(addressButton.dataset.address);
-    return;
-  }
-  const copyButton = event.target.closest('[data-copy]');
-  if (copyButton) copyValue(copyButton.dataset.copy);
-}
-
-elements.searchForm.addEventListener('submit', (event) => {
-  event.preventDefault();
-  const term = elements.searchInput.value.trim();
-  if (term) runSearch(term);
-});
-
-document.querySelectorAll('.example-search').forEach((button) => {
-  button.addEventListener('click', () => {
-    elements.searchInput.value = button.dataset.query;
-    runSearch(button.dataset.query);
-  });
-});
-
-elements.retry.addEventListener('click', () => refreshDashboard());
-elements.loadMore.addEventListener('click', loadMoreBlocks);
-elements.dialogClose.addEventListener('click', () => elements.dialog.close());
-elements.dialog.addEventListener('click', (event) => {
-  if (event.target === elements.dialog) elements.dialog.close();
-});
-document.addEventListener('click', handleActionClick);
-
-refreshDashboard();
-state.refreshTimer = window.setInterval(() => refreshDashboard(), 10_000);
+async function search(term) { const result = await api(`/api/search?q=${encodeURIComponent(term)}`); if (result.kind === 'block') return navigate(`/block/${result.data.summary.height}`); if (result.kind === 'transaction') return navigate(`/tx/${result.data.transaction.id}`); if (result.kind === 'address') return navigate(`/address/${result.data.address}`); throw new Error('Resultado de busca desconhecido'); }
+async function render() { if (state.busy) return; state.busy = true; try { const parts = location.pathname.split('/').filter(Boolean); const [page = '', value] = parts; if (page === 'blocks') await blocksPage(); else if (page === 'transactions') await transactionsPage(); else if (page === 'mempool') await mempoolPage(); else if (page === 'network') await networkPage(); else if (page === 'block' && value) await blockPage(decodeURIComponent(value)); else if (page === 'tx' && value) await txPage(decodeURIComponent(value)); else if (page === 'address' && value) await addressPage(decodeURIComponent(value)); else await home(); } catch (error) { setDisconnected(error); app.innerHTML = `<section class="panel empty"><strong>Não foi possível carregar esta página.</strong><p>${esc(error.message)}</p></section>`; } finally { state.busy = false; } }
+function navigate(path) { history.pushState({}, '', path); return render(); }
+document.addEventListener('click', event => { const anchor = event.target.closest('a[data-link]'); if (anchor) { event.preventDefault(); navigate(anchor.getAttribute('href')); } const moreBlocks = event.target.closest('[data-more-blocks]'); if (moreBlocks) blocksPage(moreBlocks.dataset.moreBlocks); const moreTransactions = event.target.closest('[data-more-transactions]'); if (moreTransactions) transactionsPage(moreTransactions.dataset.moreTransactions); });
+document.querySelector('#search-form').addEventListener('submit', event => { event.preventDefault(); search(document.querySelector('#search-input').value.trim()).catch(error => { setDisconnected(error); }); });
+document.querySelector('#retry-button').addEventListener('click', render); window.addEventListener('popstate', render); render(); setInterval(() => { if (!state.busy) render(); }, 10_000);

@@ -4,192 +4,35 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="dark">
-  <meta name="description" content="Explorador local da blockchain WynCoin">
+  <meta name="description" content="Explorador público e somente leitura da blockchain WynCoin">
   <title>WynCoin Explorer</title>
   <link rel="stylesheet" href="/assets/styles.css">
 </head>
 <body>
-  <div class="ambient ambient-one" aria-hidden="true"></div>
-  <div class="ambient ambient-two" aria-hidden="true"></div>
-
   <header class="topbar">
-    <a class="brand" href="/" aria-label="WynCoin Explorer - início">
-      <span class="brand-mark" aria-hidden="true">W</span>
-      <span>
-        <strong>WynCoin</strong>
-        <small>Blockchain Explorer</small>
-      </span>
-    </a>
-
-    <div class="node-pill" id="node-pill" aria-live="polite">
-      <span class="status-dot"></span>
-      <span id="node-pill-text">Conectando ao nó…</span>
-    </div>
+    <a class="brand" href="/" data-link aria-label="WynCoin Explorer - início"><span class="brand-mark">W</span><span><strong>WynCoin</strong><small>Blockchain Explorer</small></span></a>
+    <nav aria-label="Navegação principal">
+      <a href="/blocks" data-link>Blocos</a>
+      <a href="/transactions" data-link>Transações</a>
+      <a href="/mempool" data-link>Mempool</a>
+      <a href="/network" data-link>Rede</a>
+    </nav>
+    <div class="node-pill" id="node-pill"><span></span><strong id="node-state">Conectando…</strong></div>
   </header>
 
-  <main class="page-shell">
-    <section class="hero">
-      <div>
-        <span class="eyebrow">WYNCOIN LOCAL NETWORK</span>
-        <h1>Veja cada bloco.<br><span>Entenda cada transação.</span></h1>
-        <p>Uma visão em tempo real da sua blockchain, direto do banco persistente do nó.</p>
-      </div>
-
-      <form class="search-box" id="search-form" role="search">
-        <label for="search-input">Buscar na blockchain</label>
-        <div class="search-row">
-          <span class="search-icon" aria-hidden="true">⌕</span>
-          <input
-            id="search-input"
-            name="q"
-            type="search"
-            autocomplete="off"
-            placeholder="Altura, hash, TXID ou endereço WYN…"
-            required
-          >
-          <button type="submit">Explorar</button>
-        </div>
-        <small>Exemplos: <button class="text-button example-search" type="button" data-query="0">bloco 0</button> ou cole um hash completo.</small>
+  <main class="shell">
+    <section class="search-hero">
+      <div><span class="eyebrow">WYNCOIN EXPLORER</span><h1>Blockchain aberta.<br><em>Dados verificáveis.</em></h1></div>
+      <form id="search-form" class="search-box" role="search">
+        <label for="search-input">Buscar bloco, transação ou endereço</label>
+        <div><input id="search-input" autocomplete="off" placeholder="Altura, hash, TXID ou endereço WYN…" required><button>Explorar</button></div>
+        <small>Dados locais, somente leitura e atualizados automaticamente.</small>
       </form>
     </section>
-
-    <section class="connection-alert" id="connection-alert" hidden>
-      <strong>O explorador não conseguiu falar com o wyncoind.</strong>
-      <span id="connection-error">Confirme se o nó está em execução.</span>
-      <button type="button" id="retry-button">Tentar novamente</button>
-    </section>
-
-    <section class="metrics" aria-label="Resumo da blockchain">
-      <article class="metric-card">
-        <span class="metric-icon" aria-hidden="true">▦</span>
-        <div>
-          <span class="metric-label">Altura atual</span>
-          <strong class="metric-value" id="metric-height">—</strong>
-          <small id="metric-tip">Aguardando o nó</small>
-        </div>
-      </article>
-
-      <article class="metric-card">
-        <span class="metric-icon" aria-hidden="true">⇄</span>
-        <div>
-          <span class="metric-label">Transações</span>
-          <strong class="metric-value" id="metric-transactions">—</strong>
-          <small id="metric-mempool">— no mempool</small>
-        </div>
-      </article>
-
-      <article class="metric-card">
-        <span class="metric-icon" aria-hidden="true">⛏</span>
-        <div>
-          <span class="metric-label">Mineração</span>
-          <strong class="metric-value metric-value-small" id="metric-mining">—</strong>
-          <small id="metric-difficulty">Dificuldade —</small>
-        </div>
-      </article>
-
-      <article class="metric-card">
-        <span class="metric-icon" aria-hidden="true">◈</span>
-        <div>
-          <span class="metric-label">Recompensa</span>
-          <strong class="metric-value metric-value-small" id="metric-reward">—</strong>
-          <small id="metric-uptime">Uptime —</small>
-        </div>
-      </article>
-    </section>
-
-    <section class="content-grid">
-      <article class="panel blocks-panel">
-        <div class="panel-heading">
-          <div>
-            <span class="eyebrow">LEDGER</span>
-            <h2>Blocos recentes</h2>
-          </div>
-          <div class="live-label"><span></span> atualização automática</div>
-        </div>
-
-        <div class="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>Bloco</th>
-                <th>Hash</th>
-                <th>Horário</th>
-                <th>TXs</th>
-                <th>Minerador</th>
-                <th>Recompensa</th>
-              </tr>
-            </thead>
-            <tbody id="blocks-body">
-              <tr class="loading-row"><td colspan="6">Carregando blocos…</td></tr>
-            </tbody>
-          </table>
-        </div>
-
-        <div class="panel-footer">
-          <span id="blocks-range">—</span>
-          <button class="secondary-button" type="button" id="load-more-button" disabled>Carregar anteriores</button>
-        </div>
-      </article>
-
-      <aside class="panel mempool-panel">
-        <div class="panel-heading">
-          <div>
-            <span class="eyebrow">AGUARDANDO BLOCO</span>
-            <h2>Mempool</h2>
-          </div>
-          <span class="count-badge" id="mempool-count">0</span>
-        </div>
-
-        <div class="mempool-list" id="mempool-list">
-          <div class="empty-state">
-            <span aria-hidden="true">✓</span>
-            <strong>Mempool vazio</strong>
-            <p>As novas transações aparecerão aqui antes da confirmação.</p>
-          </div>
-        </div>
-      </aside>
-    </section>
-
-    <section class="network-strip">
-      <div>
-        <span>Rede</span>
-        <strong id="network-id">—</strong>
-      </div>
-      <div>
-        <span>Versão do nó</span>
-        <strong id="node-version">—</strong>
-      </div>
-      <div>
-        <span>Banco</span>
-        <strong class="mono truncate" id="database-path">—</strong>
-      </div>
-      <div>
-        <span>Última atualização</span>
-        <strong id="last-update">—</strong>
-      </div>
-    </section>
+    <section class="connection-alert" id="connection-alert" hidden><strong>O explorador não conseguiu falar com o nó.</strong><span id="connection-error"></span><button id="retry-button" type="button">Tentar novamente</button></section>
+    <section id="app" aria-live="polite"></section>
   </main>
-
-  <footer>
-    <span>WynCoin Explorer <strong id="explorer-version">v0.1.0</strong></span>
-    <span>Interface local e somente leitura</span>
-  </footer>
-
-  <dialog class="details-dialog" id="details-dialog">
-    <div class="dialog-shell">
-      <div class="dialog-header">
-        <div>
-          <span class="eyebrow" id="dialog-eyebrow">DETALHES</span>
-          <h2 id="dialog-title">Blockchain</h2>
-        </div>
-        <button class="icon-button" type="button" id="dialog-close" aria-label="Fechar">×</button>
-      </div>
-      <div class="dialog-content" id="dialog-content"></div>
-    </div>
-  </dialog>
-
-  <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
-
+  <footer><span>WynCoin Explorer <strong id="explorer-version">—</strong></span><span>Interface local e somente leitura</span></footer>
   <script src="/assets/app.js" defer></script>
 </body>
 </html>
