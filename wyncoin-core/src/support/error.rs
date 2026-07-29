@@ -1,6 +1,5 @@
 use thiserror::Error;
 
-pub type Result<T> = std::result::Result<T, WynError>;
 
 #[derive(Debug, Error)]
 pub enum WynError {
