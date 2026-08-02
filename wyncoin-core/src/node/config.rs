@@ -102,7 +102,7 @@ impl Default for NodeConfig {
             chain: ChainConfig {
                 consensus_version: 4,
                 initial_target: 1_099_511_627_775,
-                block_reward: 5_000_000_000,
+                block_reward: 1_000_000_000,
                 target_block_time_seconds: 60,
                 retarget_interval_blocks: 20,
                 max_retarget_factor: 4,

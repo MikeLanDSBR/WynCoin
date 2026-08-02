@@ -31,7 +31,7 @@ valor real sem revisão de segurança independente.
 ## Concluído — v0.4: regras da testnet atual
 
 - Rede `wyncoin-public-testnet-v4`.
-- Recompensa fixa de 50 WYN por bloco e emissão sem oferta máxima.
+- Recompensa fixa de 10 WYN por bloco e emissão sem oferta máxima.
 - Meta de 60 segundos por bloco; retarget a cada 20 blocos, limitado a 4×.
 - Coinbase utilizável após 20 blocos.
 - Taxa mínima zero: a taxa é opcional, mas o remetente a paga separadamente.
@@ -56,8 +56,8 @@ minerando e sincronizando por várias janelas de retarget.
 - Medir se a média converge para aproximadamente 60 segundos por bloco.
 - Confirmar que o retarget reage à entrada e saída de hashrate.
 - Verificar que coinbases só aparecem como gastáveis após 20 blocos.
-- Testar transferência com taxa: enviar 50 WYN com taxa de 1 WYN deve entregar
-  50 WYN ao destinatário e acrescentar 1 WYN à coinbase do minerador.
+- Testar transferência com taxa: enviar 9 WYN com taxa de 1 WYN deve entregar
+  9 WYN ao destinatário e acrescentar 1 WYN à coinbase do minerador.
 - Registrar qualquer fork, rejeição de peer ou divergência de tip antes de
   prosseguir.
 

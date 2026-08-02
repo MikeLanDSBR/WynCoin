@@ -4,7 +4,7 @@ listen = "127.0.0.1:9332"
 
 [chain]
 difficulty = 4
-block_reward = 5000000000
+block_reward = 1000000000
 min_block_interval_seconds = 60
 max_transactions_per_block = 100
 

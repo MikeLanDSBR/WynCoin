@@ -834,7 +834,7 @@ mod tests {
             network_id: "test-network".into(),
             consensus_version: 4,
             initial_target: u64::MAX,
-            block_reward: 5_000_000_000,
+            block_reward: 1_000_000_000,
             target_block_time_seconds: 1,
             retarget_interval_blocks: 2,
             max_retarget_factor: 4,
@@ -856,7 +856,7 @@ mod tests {
         blockchain.validate_full_chain().unwrap();
         assert_eq!(
             blockchain.balance_of(&wallet.address).unwrap(),
-            5_000_000_000
+            1_000_000_000
         );
     }
 
@@ -871,7 +871,7 @@ mod tests {
             .build_transaction(
                 &blockchain.get_utxos_for(&miner.address),
                 &recipient.address,
-                1_000_000_000,
+                999_000_000,
                 100_000,
             )
             .unwrap();
@@ -881,11 +881,11 @@ mod tests {
 
         assert_eq!(
             blockchain.balance_of(&recipient.address).unwrap(),
-            1_000_000_000
+            999_000_000
         );
         assert_eq!(
             blockchain.balance_of(&miner.address).unwrap(),
-            9_000_000_000
+            1_001_000_000
         );
     }
 
@@ -989,7 +989,7 @@ mod tests {
             .build_transaction(
                 &blockchain.get_utxos_for(&miner.address),
                 &recipient.address,
-                1_000_000_000,
+                999_000_000,
                 100_000,
             )
             .unwrap();
@@ -998,7 +998,7 @@ mod tests {
         let pending = blockchain.address_activity(&recipient.address, 10).unwrap();
         assert_eq!(pending.len(), 1);
         assert_eq!(pending[0].block_height, None);
-        assert_eq!(pending[0].incoming, 1_000_000_000);
+        assert_eq!(pending[0].incoming, 999_000_000);
 
         blockchain.mine_and_commit(&miner.address).unwrap();
         let confirmed = blockchain.address_activity(&recipient.address, 10).unwrap();

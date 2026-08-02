@@ -22,7 +22,7 @@ publicamente acessível.
 
 | Regra | Valor |
 | --- | --- |
-| Recompensa base | 50 WYN por bloco, permanente |
+| Recompensa base | 10 WYN por bloco, permanente |
 | Oferta máxima | Não há; a emissão é contínua enquanto houver mineração |
 | Maturidade da coinbase | 20 blocos |
 | Taxa mínima | Não há; transações com taxa zero são válidas |
@@ -37,11 +37,11 @@ As taxas não criam moedas. Em uma transação UTXO, `taxa = total dos inputs -
 total dos outputs`. O bloco só é aceito quando sua coinbase paga exatamente:
 
 ```text
-50 WYN de subsídio + soma das taxas das transações do bloco
+10 WYN de subsídio + soma das taxas das transações do bloco
 ```
 
-Assim, enviar 50 WYN com taxa de 1 WYN requer 51 WYN do remetente; o
-destinatário recebe 50 WYN e o minerador recebe a taxa junto da recompensa.
+Assim, enviar 9 WYN com taxa de 1 WYN requer 10 WYN do remetente; o
+destinatário recebe 9 WYN e o minerador recebe a taxa junto da recompensa.
 
 O Explorer separa agora oferta emitida (somente subsídios) de taxas distribuídas
 e do pagamento total das coinbases.
