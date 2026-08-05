@@ -7,3 +7,4 @@
 /data/wallets/*.json
 !/data/wallets/.gitkeep
 .env
+/graphify-out
